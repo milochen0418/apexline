@@ -1,0 +1,86 @@
+/* The race's screen: two views side by side (or one over the other on a tall screen), the
+   numbers over them and the panels (before the start, paused, the result). */
+
+.ax-box { position: fixed; inset: 0; background: #020617; overflow: hidden; user-select: none; }
+.ax-root canvas { display: block; }
+.ax-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #cbd5e1; font: 600 18px Inter, system-ui, sans-serif; }
+
+.ax-hud { position: absolute; inset: 0; pointer-events: none; font-family: Inter, system-ui, sans-serif; color: #f8fafc; }
+.ax-view { position: absolute; top: 0; bottom: 0; width: 50%; }
+.ax-you { left: 0; }
+.ax-ai { right: 0; }
+.ax-stacked .ax-view { width: 100%; height: 50%; }
+.ax-stacked .ax-you { top: 0; bottom: auto; }
+.ax-stacked .ax-ai { top: 50%; bottom: auto; }
+.ax-divider { position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1.5px; background: #020617; box-shadow: 0 0 12px rgba(0,0,0,.6); }
+.ax-stacked .ax-divider { left: 0; right: 0; top: 50%; bottom: auto; width: auto; height: 3px; margin: -1.5px 0 0 0; }
+
+.ax-top { position: absolute; top: 14px; left: 16px; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+.ax-who { display: flex; align-items: center; gap: 10px; }
+.ax-place { font-size: 30px; font-weight: 800; color: #e2e8f0; }
+.ax-place.ax-first { color: #fbbf24; }
+.ax-name { font-size: 15px; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: rgba(2,6,23,.55); max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax-lap { margin-top: 4px; font-size: 16px; font-weight: 600; }
+.ax-times { margin-top: 2px; font: 500 13px "JetBrains Mono", ui-monospace, monospace; color: #cbd5e1; }
+.ax-speed { position: absolute; right: 18px; bottom: 16px; text-align: right; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+.ax-kmh { font: 800 46px "JetBrains Mono", ui-monospace, monospace; }
+.ax-speed small { display: block; margin-top: -6px; font-size: 13px; color: #cbd5e1; }
+.ax-warn { position: absolute; top: 34%; left: 0; right: 0; text-align: center; font-size: 30px; font-weight: 800; color: #f87171; text-shadow: 0 2px 8px #000; }
+.ax-flash { position: absolute; top: 22%; left: 0; right: 0; text-align: center; font-size: 24px; font-weight: 800; color: #fde68a; text-shadow: 0 2px 8px #000; }
+.ax-extra { position: absolute; left: 16px; bottom: 16px; max-width: min(380px, 40%); }
+.ax-stacked .ax-extra { max-width: 60%; }
+.ax-plan { padding: 8px 12px; border-radius: 12px; background: rgba(2,6,23,.62); backdrop-filter: blur(6px); font-size: 13px; line-height: 1.45; }
+.ax-plan-head { font-weight: 700; color: #bfdbfe; }
+.ax-plan-now { display: flex; align-items: center; gap: 6px; color: #e2e8f0; }
+.ax-plan-note { margin-top: 2px; color: #cbd5e1; font-style: italic; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ax-plan-aggr { margin-top: 2px; color: #94a3b8; }
+.ax-bad { color: #fca5a5 !important; }
+
+.ax-clock { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 3px 12px; border-radius: 999px; background: rgba(2,6,23,.6); font: 600 16px "JetBrains Mono", ui-monospace, monospace; }
+.ax-clock:empty { display: none; }
+.ax-count { position: absolute; top: 38%; left: 0; right: 0; text-align: center; font-size: 110px; font-weight: 900; color: #fff; text-shadow: 0 6px 20px rgba(0,0,0,.7); }
+.ax-count.ax-go { color: #4ade80; }
+.ax-map { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); width: 220px; height: 150px; border-radius: 14px; background: rgba(2,6,23,.55); }
+.ax-stacked .ax-map { bottom: auto; top: calc(50% - 75px); left: auto; right: 12px; transform: none; width: 160px; height: 110px; }
+.ax-pause-btn { pointer-events: auto; position: absolute; top: 12px; right: 14px; width: 38px; height: 38px; border-radius: 999px; border: 1px solid rgba(255,255,255,.25); background: rgba(2,6,23,.6); color: #fff; font-size: 13px; cursor: pointer; }
+.ax-stacked .ax-pause-btn { top: auto; bottom: calc(50% + 10px); }
+
+.ax-panel { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; background: rgba(2,6,23,.35); font-family: Inter, system-ui, sans-serif; color: #e2e8f0; overflow: auto; }
+.ax-panel.ax-open { display: flex; }
+.ax-card { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 22px 24px; border-radius: 20px; background: rgba(15,23,42,.93); border: 1px solid rgba(255,255,255,.1); box-shadow: 0 30px 80px rgba(0,0,0,.55); }
+.ax-card.ax-small { width: min(380px, 100%); }
+.ax-card.ax-wide { width: min(760px, 100%); }
+.ax-title { font-size: 28px; font-weight: 800; color: #f8fafc; }
+.ax-sub { margin-top: 4px; color: #94a3b8; font-size: 14px; }
+.ax-vs { margin-top: 14px; font-size: 17px; font-weight: 700; }
+.ax-red { color: #f87171 !important; }
+.ax-blue { color: #60a5fa !important; }
+.ax-status { margin-top: 12px; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; background: rgba(30,41,59,.8); font-size: 15px; }
+.ax-status.ax-ok { color: #86efac; }
+.ax-quote { margin-top: 10px; color: #cbd5e1; font-size: 14px; font-style: italic; line-height: 1.5; }
+.ax-buttons { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; }
+.ax-btn { padding: 10px 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,.18); background: rgba(30,41,59,.9); color: #e2e8f0; font-size: 15px; font-weight: 600; cursor: pointer; }
+.ax-btn:hover { border-color: rgba(255,255,255,.4); }
+.ax-btn.ax-primary { background: #f59e0b; border-color: #f59e0b; color: #0f172a; }
+.ax-btn.ax-primary:hover { background: #fbbf24; }
+.ax-keys { margin-top: 16px; font-size: 13px; color: #94a3b8; }
+.ax-how { margin-top: 10px; font-size: 13px; color: #94a3b8; line-height: 1.55; }
+.ax-section { margin-top: 18px; font-weight: 700; color: #f8fafc; }
+.ax-table { margin-top: 10px; width: 100%; border-collapse: collapse; font-size: 14px; }
+.ax-table th { text-align: left; font-weight: 500; color: #94a3b8; padding: 4px 8px 4px 0; }
+.ax-table td { padding: 5px 8px 5px 0; border-top: 1px solid rgba(255,255,255,.08); font-family: "JetBrains Mono", ui-monospace, monospace; }
+.ax-plans td:first-child { font-family: Inter, system-ui, sans-serif; white-space: nowrap; }
+.ax-over { color: #f87171; }
+.ax-good { color: #4ade80; }
+.ax-slow { color: #94a3b8; }
+.ax-legend { margin-top: 6px; font-size: 12px; color: #94a3b8; }
+.ax-spin { display: inline-block; width: 14px; height: 14px; border-radius: 999px; border: 2px solid rgba(147,197,253,.35); border-top-color: #93c5fd; animation: ax-spin 0.9s linear infinite; flex: none; }
+@keyframes ax-spin { to { transform: rotate(360deg); } }
+
+/* Your numbers on the left edge, the AI's on the right edge: the middle is the map's. */
+.ax-you .ax-speed { left: 18px; right: auto; text-align: left; }
+.ax-ai .ax-top { left: auto; right: 66px; text-align: right; }
+.ax-ai .ax-who { justify-content: flex-end; }
+.ax-ai .ax-extra { left: auto; right: 16px; bottom: auto; top: 128px; max-width: min(360px, 42%); }
+.ax-stacked .ax-ai .ax-top { right: 16px; }
+.ax-stacked .ax-ai .ax-extra { top: auto; bottom: 16px; left: 16px; right: auto; max-width: 55%; }
