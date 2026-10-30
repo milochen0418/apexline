@@ -4,8 +4,9 @@
 // for every corner and how hard to race you: planner.js), and the briefing shows it thinking.
 // Its car is then driven by that plan (driver.js); after each of its laps the model hears how
 // every corner went and may change the plan for the next lap. The cars can knock into each
-// other and into the walls (physics.js). At the end: who won, the times, and every plan the AI
-// made next to what the grip allowed in each corner.
+// other and into the walls (physics.js). You pick your car (garage.js) and the AI's level, and
+// the steering help and the driving line (guide.js) can be switched off. At the end: who won, the
+// times, and every plan the AI made next to what the grip allowed in each corner.
 //
 // The page (race.jsx) passes {track, backend, labels, lang, opponent, onEvent}; onEvent hears
 // {type: "finished", result} and {type: "leave"}. window.__apexline is this game, for tests
@@ -13,16 +14,37 @@
 
 import * as THREE from "three";
 import { CarModel } from "./cars.js";
-import { Driver, Telemetry, cautiousPlan } from "./driver.js";
+import { Driver, LEVELS, Telemetry, cautiousPlan, gripPlan } from "./driver.js";
+import { CARS, carSpec, carStats } from "./garage.js";
+import { Guide } from "./guide.js";
 import { Hud, clock, fill, h } from "./hud.js";
 import { Input } from "./input.js";
-import { Car, STEP, Track, collide } from "./physics.js";
+import { Car, STEP, Track, angleDiff, clamp, collide } from "./physics.js";
 import { Planner } from "./planner.js";
 import { buildWorld } from "./scenery.js";
 import { Sound } from "./sound.js";
 
 const GRACE = 25; // seconds the other car has to finish after the first one did
 const PLAYER_OFF = 2.6; // the grid: you on the left, the AI on the right
+const LINE_SHARE = 0.97; // the driving line's speeds: this share of what the grip allows
+const CAM_TURN = 5.5; // per second: how fast the camera comes round after the car
+const KEYS = { level: "apexline.level", car: "apexline.car", line: "apexline.line", help: "apexline.help" };
+
+function saved(key, fallback) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function save(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // kept for this race only
+  }
+}
 
 export class Game {
   constructor(el, opts) {
@@ -33,6 +55,9 @@ export class Game {
     this.paused = false;
     this.auto = false;
     this.camFar = false;
+    this.follow = [{ yaw: 0, y: 0 }, { yaw: 0, y: 0 }];
+    this.showLine = saved(KEYS.line, "1") === "1";
+    this.help = saved(KEYS.help, "1") === "1";
     this.version = 0;
     this.model = opts.opponent || "";
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -69,11 +94,12 @@ export class Game {
     this.driver = new Driver(this.ai);
     this.autopilot = new Driver(this.player);
     this.telemetry = new Telemetry(this.ai);
-    const night = this.world.night;
-    this.models = [
-      new CarModel(this.scene, { color: "#dc2626", accent: "#fecaca", name: this.t.you || "You", night }),
-      new CarModel(this.scene, { color: "#2563eb", accent: "#bfdbfe", name: "AI", night }),
-    ];
+    const level = saved(KEYS.level, "normal");
+    this.setLevel(LEVELS[level] ? level : "normal");
+    this.models = [null, new CarModel(this.scene, { color: "#2563eb", accent: "#bfdbfe", name: "AI", night: this.world.night })];
+    const car = saved(KEYS.car, "gt");
+    this.setCar(CARS[car] ? car : "gt");
+    this.guide = new Guide(this.scene, this.track);
     this.hud = new Hud(this.el, this.t, { you: this.t.you || "You", ai: this.aiName() });
     this.hud.pauseBtn.addEventListener("click", () => this.togglePause());
     this.planner = new Planner({ backend: this.opts.backend, track: pack.id, lang: this.opts.lang, onState: (s) => this.planState(s) });
@@ -123,6 +149,7 @@ export class Game {
 
   planState(s) {
     if (this.disposed) return;
+    const still = s.type === "thinking" && this.planInfo.type === "thinking";
     if (s.type === "plan") {
       if (s.model) this.model = s.model;
       this.hud.ai.name.textContent = this.aiName();
@@ -134,7 +161,7 @@ export class Game {
     } else {
       this.planInfo = s;
     }
-    if (this.phase === "briefing") this.showBriefing();
+    if (this.phase === "briefing" && !still) this.showBriefing();
     this.drawPlan(true);
   }
 
@@ -183,13 +210,105 @@ export class Game {
     return h("button", { class: `ax-btn ${primary ? "ax-primary" : ""}`, onClick, "data-testid": id }, text);
   }
 
+  setLevel(name) {
+    this.levelName = name;
+    this.driver.setLevel(LEVELS[name]);
+    this.telemetry.pace = LEVELS[name].pace;
+    save(KEYS.level, name);
+  }
+
+  setCar(name) {
+    this.carName = name;
+    const spec = carSpec(name, this.pack.car);
+    this.player.setSpec(spec);
+    this.autopilot.setPlan(gripPlan(this.track, LINE_SHARE, spec));
+    this.models[0]?.dispose();
+    this.models[0] = new CarModel(this.scene, { color: CARS[name].paint, accent: CARS[name].accent, name: this.t.you || "You", night: this.world.night, shape: name });
+    save(KEYS.car, name);
+  }
+
+  setAid(which, on) {
+    if (which === "line") this.showLine = on;
+    else this.help = on;
+    save(KEYS[which], on ? "1" : "0");
+  }
+
+  // Your car, with what it is good at.
+  carPicker(redraw) {
+    const t = this.t;
+    const stats = carStats(this.pack.car);
+    const bar = (name, stat) =>
+      h("span", { class: "ax-stat" }, t[`stat_${stat}`] || stat, h("span", { class: "ax-stat-bar" }, h("i", { style: `width:${Math.round(18 + 82 * stats[name][stat])}%` })));
+    const card = (name) =>
+      h(
+        "button",
+        {
+          class: `ax-car ${name === this.carName ? "ax-on" : ""}`,
+          "data-testid": `car-${name}`,
+          onClick: () => {
+            this.setCar(name);
+            redraw();
+          },
+        },
+        h("span", { class: "ax-car-name" }, t[`car_${name}`] || name),
+        h("span", { class: "ax-car-note" }, t[`car_${name}_note`] || ""),
+        ...["power", "top", "grip", "brake", "nimble"].map((stat) => bar(name, stat)),
+      );
+    return h("div", { class: "ax-cars", "data-testid": "cars" }, ...Object.keys(CARS).map(card));
+  }
+
+  // The opponent's level, to pick before a race; `redraw` shows the panel again with the new one.
+  levelPicker(redraw) {
+    const t = this.t;
+    const choose = (name) => () => {
+      this.setLevel(name);
+      redraw();
+    };
+    return h(
+      "div",
+      { class: "ax-levels", "data-testid": "levels" },
+      h("span", { class: "ax-level-label" }, t.level || "Difficulty"),
+      ...Object.keys(LEVELS).map((name) => h("button", { class: `ax-btn ax-level ${name === this.levelName ? "ax-on" : ""}`, onClick: choose(name), "data-testid": `level-${name}` }, t[`level_${name}`] || name)),
+    );
+  }
+
+  // What can be switched off.
+  aidPicker(redraw) {
+    const t = this.t;
+    const aid = (which, on, text, tip) =>
+      h(
+        "button",
+        {
+          class: `ax-btn ax-level ${on ? "ax-on" : ""}`,
+          title: tip,
+          "data-testid": `aid-${which}`,
+          onClick: () => {
+            this.setAid(which, !on);
+            redraw();
+          },
+        },
+        `${on ? "✓ " : ""}${text}`,
+      );
+    return h(
+      "div",
+      { class: "ax-levels" },
+      h("span", { class: "ax-level-label" }, t.aids || "Aids"),
+      aid("help", this.help, t.aid_help || "Steering help", t.aid_help_tip),
+      aid("line", this.showLine, t.aid_line || "Driving line L", t.aid_line_tip),
+    );
+  }
+
   showBriefing() {
     const t = this.t;
     const pack = this.pack;
     const info = this.planInfo;
     const plan = this.driver.plan;
     let status;
-    if (info.type === "thinking" || info.type === "waiting") status = h("div", { class: "ax-status" }, h("span", { class: "ax-spin" }), fill(t.studying || "The AI is studying the track… {s} s", { s: Math.round(info.secs || 0) }));
+    this.studying = null;
+    if (info.type === "thinking" || info.type === "waiting") {
+      this.studying = h("span", {}, this.studyWords());
+      status = h("div", { class: "ax-status" }, h("span", { class: "ax-spin" }), this.studying);
+    }
     else if (info.type === "error") status = h("div", { class: "ax-status ax-bad" }, fill(t.study_failed || "The AI didn't answer ({e}): it will drive carefully.", { e: info.text }));
     else if (plan.cached) status = h("div", { class: "ax-status ax-ok" }, fill(t.remembered || "The AI remembers this track (plan v{v}).", { v: plan.version }));
     else status = h("div", { class: "ax-status ax-ok" }, fill(t.studied || "The AI has its plan ({s} s of thinking).", { s: Math.round(plan.secs || 0) }));
@@ -211,11 +330,18 @@ export class Game {
         h("div", { class: "ax-vs" }, h("span", { class: "ax-red" }, t.you || "You"), " vs ", h("span", { class: "ax-blue" }, this.aiName())),
         status,
         plan.note ? h("div", { class: "ax-quote" }, `“${plan.note}”`) : null,
+        this.carPicker(() => this.showBriefing()),
+        this.levelPicker(() => this.showBriefing()),
+        this.aidPicker(() => this.showBriefing()),
         h("div", { class: "ax-buttons" }, buttons),
         h("div", { class: "ax-keys" }, t.keys || "↑ throttle · ↓ brake · ← → steer · R back on the road · Esc pause · M sound · C camera"),
         h("div", { class: "ax-how" }, t.how_ai || ""),
       ),
     );
+  }
+
+  studyWords() {
+    return fill(this.t.studying || "The AI is studying the track… {s} s", { s: Math.round(this.planInfo.secs || 0) });
   }
 
   restudy() {
@@ -271,6 +397,7 @@ export class Game {
   key(code) {
     if (code === "KeyM") this.sound.toggle();
     else if (code === "KeyC") this.camFar = !this.camFar;
+    else if (code === "KeyL") this.setAid("line", !this.showLine);
     else if (code === "Escape" || code === "KeyP") this.togglePause();
     else if (code === "KeyR" && this.phase === "racing" && !this.paused) this.player.putBack();
     else if (code === "Enter" && this.phase === "briefing" && (this.planInfo.type === "ready" || this.planInfo.type === "error")) this.go();
@@ -308,25 +435,33 @@ export class Game {
       if (this.phase === "briefing" && this.planInfo.type === "thinking") this.showBriefingTick(now);
     }
     if (this.planInfo.type === "thinking") this.drawPlan(false);
-    this.models[0].update(this.player, dt);
-    this.models[1].update(this.ai, dt);
+    const between = this.phase === "racing" ? this.acc / STEP : 1;
+    this.poses = [this.player.pose(between), this.ai.pose(between)];
+    this.models[0].update(this.player, dt, this.poses[0]);
+    this.models[1].update(this.ai, dt, this.poses[1]);
     this.aim(dt, now);
+    this.lineOn = this.showLine && (this.phase === "racing" || this.phase === "countdown");
+    if (this.lineOn) this.guide.update(this.player, this.autopilot.target);
     this.render(now / 1000);
     this.hud.update(this.hudState(), now);
     this.hud.drawMap(this.track, [[this.ai, "#3b82f6"], [this.player, "#ef4444"]]);
     const you = this.player;
-    this.sound.engine(Math.abs(you.u) * 3.6, you.input.throttle || 0, this.phase === "racing" && !this.paused);
+    const running = this.phase === "racing" && !this.paused;
+    this.sound.engine(Math.abs(you.u) * 3.6, you.input.throttle || 0, running);
+    const load = Math.abs(you.side) / (you.spec.lat * you.grip());
+    this.sound.tyres(running ? Math.max(0.3 * clamp((load - 0.88) / 0.12, 0, 1), clamp(Math.abs(you.slip) / 0.24, 0, 1)) : 0);
   }
 
+  // Only the seconds change: a panel drawn anew under the mouse would lose a click.
   showBriefingTick(now) {
     if (now - (this.briefTick || 0) < 500) return;
     this.briefTick = now;
-    this.showBriefing();
+    if (this.studying) this.studying.textContent = this.studyWords();
   }
 
   physics(now) {
     const finished = this.done;
-    const youIn = finished.you !== null || this.auto ? this.autopilot.control(this.ai) : this.input.read(STEP);
+    const youIn = finished.you !== null || this.auto ? this.autopilot.control(this.ai) : this.player.assist(this.input.read(STEP, Math.abs(this.player.u)), this.help);
     if (finished.you !== null) youIn.throttle = Math.min(youIn.throttle, 0.4);
     const aiIn = this.driver.control(this.player);
     if (finished.ai !== null) aiIn.throttle = Math.min(aiIn.throttle, 0.4);
@@ -389,7 +524,7 @@ export class Game {
     const [pYou, pAi] = this.places();
     const laps = this.pack.laps;
     const one = (who, car, place) => ({
-      kmh: car.u * 3.6,
+      kmh: car.speedKmh,
       place,
       lap: Math.max(1, car.lapsDone + 1),
       lapTime: this.phase === "racing" && this.done[who] === null ? this.time - this.lapStart[who] : NaN,
@@ -414,7 +549,7 @@ export class Game {
       knocks: this.knocks[who],
     });
     const plans = this.plans.map((p) => ({ version: p.version, speeds: p.speeds, aggression: p.aggression, note: p.note, secs: Math.round((p.secs || 0) * 10) / 10, cached: p.cached, lap: p.lap }));
-    const result = { track: this.pack.id, model: this.model, laps: this.pack.laps, winner, you: side("you"), ai: side("ai"), bumps: this.bumps, plans, plan: this.planPayload() };
+    const result = { track: this.pack.id, model: this.model, level: this.levelName, car: this.carName, laps: this.pack.laps, winner, you: side("you"), ai: side("ai"), bumps: this.bumps, plans, plan: this.planPayload() };
     if (this.opts.onEvent) this.opts.onEvent({ type: "finished", result });
     this.showResult(result);
   }
@@ -446,7 +581,7 @@ export class Game {
         "div",
         { class: "ax-card ax-wide", "data-testid": "result" },
         h("div", { class: `ax-title ${result.winner === "you" ? "ax-red" : "ax-blue"}` }, banner),
-        h("div", { class: "ax-sub" }, this.aiName()),
+        h("div", { class: "ax-sub" }, `${t[`car_${result.car}`] || result.car} vs ${this.aiName()} · ${t[`level_${result.level}`] || result.level}`),
         h(
           "table",
           { class: "ax-table" },
@@ -457,6 +592,8 @@ export class Game {
         planTable,
         h("div", { class: "ax-legend" }, h("span", { class: "ax-over" }, t.legend_over || "too fast"), " · ", h("span", { class: "ax-good" }, t.legend_good || "near the limit"), " · ", h("span", { class: "ax-slow" }, t.legend_slow || "cautious")),
         ...notes,
+        this.carPicker(() => this.showResult(result)),
+        this.levelPicker(() => this.showResult(result)),
         h("div", { class: "ax-buttons" }, this.button(t.again || "Race again", () => this.again(), true, "again"), this.button(t.other_track || "Another track", () => this.leave(), false, "leave")),
       ),
     );
@@ -464,23 +601,34 @@ export class Game {
 
   // ------------------------------------------------------------ cameras and drawing
 
+  // Each camera hangs behind its car on a stiff arm that swings round a moment after the car:
+  // the car is seen turning in the picture, and a tap doesn't jerk the whole world (Unreal's
+  // spring arm calls this rotation lag). It looks between the nose and the way the car is going.
   aim(dt, now) {
-    const pairs = [[this.cams[0], this.player], [this.cams[1], this.ai]];
-    for (const [cam, car] of pairs) {
+    const pairs = [[this.cams[0], this.player, this.poses[0], this.follow[0]], [this.cams[1], this.ai, this.poses[1], this.follow[1]]];
+    for (const [cam, car, pose, follow] of pairs) {
       if (this.phase === "briefing" || this.phase === "loading") {
         const a = now / 4000 + (car === this.ai ? Math.PI : 0);
         cam.position.set(car.x + Math.cos(a) * 13, car.y + 4.5, car.z + Math.sin(a) * 13);
         cam.lookAt(car.x, car.y + 1, car.z);
         continue;
       }
+      const [vx, vz] = car.velocity();
+      const course = car.u > 4 ? Math.atan2(vz, vx) : pose.yaw;
+      const want = pose.yaw + angleDiff(course, pose.yaw) * 0.6;
+      if (this.snap) {
+        follow.yaw = want;
+        follow.y = pose.y;
+      } else {
+        follow.yaw += angleDiff(want, follow.yaw) * (1 - Math.exp(-CAM_TURN * dt));
+        follow.y += (pose.y - follow.y) * (1 - Math.exp(-9 * dt));
+      }
       const back = this.camFar ? 11 : 7.4;
       const up = this.camFar ? 4.6 : 2.8;
-      const hx = Math.cos(car.yaw);
-      const hz = Math.sin(car.yaw);
-      const want = new THREE.Vector3(car.x - hx * back, car.y + up, car.z - hz * back);
-      if (this.snap) cam.position.copy(want);
-      else cam.position.lerp(want, 1 - Math.exp(-7 * dt));
-      cam.lookAt(car.x + hx * 6, car.y + 1.1, car.z + hz * 6);
+      const hx = Math.cos(follow.yaw);
+      const hz = Math.sin(follow.yaw);
+      cam.position.set(pose.x - hx * back, follow.y + up, pose.z - hz * back);
+      cam.lookAt(pose.x + hx * 6, follow.y + 1.1, pose.z + hz * 6);
       cam.fov = 64 + Math.min(12, Math.max(0, car.u) * 0.2);
     }
     if (this.phase !== "briefing") this.snap = false;
@@ -509,6 +657,7 @@ export class Game {
       const [x, y, vw, vh] = views[k];
       own.showLabel(false);
       other.showLabel(true);
+      this.guide.mesh.visible = this.lineOn && car === this.player;
       this.world.beforeView(cam, car, time);
       cam.aspect = vw / vh;
       cam.updateProjectionMatrix();
@@ -527,6 +676,7 @@ export class Game {
     this.sound.dispose();
     this.hud?.dispose();
     this.world?.dispose();
+    this.guide?.dispose();
     for (const m of this.models || []) m.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();

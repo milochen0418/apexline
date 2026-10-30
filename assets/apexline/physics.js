@@ -6,16 +6,50 @@
 // The track comes from apexline/trackgen.py: points every ds metres round the centre line, the
 // racing line, the grip, the corners and where the road crosses itself ("open": no walls).
 //
-// The car is the same for both drivers: it speeds up less as it nears its top speed, brakes and
-// turns as hard as the grip under it allows (pack.car: brake and lat are m/s² times the grip).
-// Asked to turn harder than the grip allows, it turns only as much as it can and scrubs speed:
-// too fast into a corner, it runs wide into the wall.
+// How a car turns (the idea of capped sideways tyre force from iforce2d's top-down car, the slip
+// angle from Marco Monster's Car Physics for Games, kept simple enough never to spin): the steering
+// turns the nose, and the tyres bend the car's course towards the nose, as hard as the grip allows
+// (pack.car: brake and lat are m/s² times the grip). Under the grip the course follows the nose,
+// a few degrees behind it. Over the grip the nose goes on turning a little, up to the car's slide
+// angle, while the course bends only as much as it can: the car slides wide, and the tyres, now
+// pushing partly backwards, take speed off it. So a car too fast for a corner still points into
+// it and loses speed, and far too fast it runs wide into the wall.
+//
+// All cars share this; what differs is `spec` (garage.js): the road's car (pack.car, the one the
+// AI drives and the limits are worked out for) with some of these handling numbers changed.
 
 export const STEP = 1 / 120;
 export const GRAVITY = 9.8;
 
 const R_BODY = 1.05; // each car is two circles of this radius, ...
 const BODY_OFF = 1.15; // ... this far in front of and behind its middle
+
+export const HANDLING = {
+  settle: 0.14, // seconds the tyres take to catch a slide, once the grip can
+  slide: 0.3, // the largest angle (radians) the nose may lead the course by
+  agility: 0.9, // how much faster than the course the nose can turn at the grip's limit
+  turnIn: 0.06, // seconds the nose takes to answer the steering
+};
+
+const SLOW = 3; // below this speed (m/s) the tyres just roll where they point
+const BRAKE_ROTATE = 1; // braking puts weight on the front tyres: the nose turns in this much more
+const KERB = 1.1; // metres of kerb beyond the road's edge, as good as road
+const WALL_BOUNCE = 0.25; // of the speed into the wall
+const WALL_LOSS = 10; // a hit costs this share of the speed times the sine of its angle squared, ...
+const WALL_LOSS_MOST = 0.7; // ... up to this: a scrape costs almost nothing, a real hit a lot
+const WALL_RUB = 9; // m/s² while rubbing along a wall, so riding it is never quicker
+const WALL_ALIGN = 7; // per second: the nose turns the way the wall runs
+
+// A person's hands (Car.assist).
+const KEY_BASE = 5; // m/s² a full key asks for on a straight: enough to change lanes
+const KEY_ROAD = 1.3; // and this many times what the road ahead asks for
+const KEY_LOOK = 0.8; // seconds of road ahead looked at
+const KEY_OVER = 1.25; // with this share of the grip the most it can ask for: the nose turns in
+const KEY_EASE = 0.05; // the help eases off the throttle over the last share of a corner's limit
+const BRAKE_TURN = 0.5; // braking while steering asks this much more, to rotate the car
+const EDGE_KEEP = 0.4; // the help keeps the car's middle this far inside the road's edge, ...
+const EDGE_TIME = 0.6; // ... slowing its way to the edge to arrive after this many seconds, ...
+const EDGE_SOON = 0.28; // ... and corrects within this many
 
 export function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
@@ -76,6 +110,16 @@ export class Track {
       let sum = 0;
       for (let k = -3; k <= 3; k++) sum += raw[(i + k + n) % n];
       this.lineBend[i] = sum / 7;
+    }
+    // And how sharply the road itself bends (left +).
+    this.roadBend = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let k = -3; k <= 3; k++) {
+        const j = (i + k + n) % n;
+        sum += -angleDiff(Math.atan2(this.tz[(j + 1) % n], this.tx[(j + 1) % n]), Math.atan2(this.tz[j], this.tx[j])) / this.ds;
+      }
+      this.roadBend[i] = sum / 7;
     }
     // Which corner each point belongs to (-1: a straight).
     this.cornerAt = new Int16Array(n).fill(-1);
@@ -155,11 +199,16 @@ export class Track {
 }
 
 export class Car {
-  constructor(track, name) {
+  constructor(track, name, spec = track.car) {
     this.track = track;
     this.name = name;
+    this.setSpec(spec);
     this.events = []; // {type: "wall" | "bump" | "lap" | "finish", ...} since the game last read them
     this.reset(0, 0, 0);
+  }
+
+  setSpec(spec) {
+    this.spec = { ...HANDLING, ...spec };
   }
 
   // On the grid: `back` points behind point i, `off` metres left of the centre, standing still.
@@ -169,7 +218,10 @@ export class Car {
     [this.x, this.z] = tr.point(at, off);
     this.yaw = Math.atan2(tr.tz[at], tr.tx[at]);
     this.u = 0; // forward speed
-    this.v = 0; // sideways (left) speed after a knock, dying away
+    this.v = 0; // sideways (left) speed: the slide, and a knock's push
+    this.turn = 0; // how fast the nose is turning, left + (radians a second)
+    this.side = 0; // the tyres' sideways push right now, left + (m/s²)
+    this.ax = 0; // the car's forward push right now (m/s²)
     this.spin = 0; // extra turning after a knock
     this.steer = 0; // the wheels' angle, left +
     this.i = at;
@@ -186,6 +238,7 @@ export class Car {
     this.input = { throttle: 0, brake: 0, steer: 0 };
     this.stuck = 0;
     this.backwards = 0;
+    this.was = { x: this.x, y: this.y, z: this.z, yaw: this.yaw };
   }
 
   get lapsDone() {
@@ -193,7 +246,12 @@ export class Car {
   }
 
   get speedKmh() {
-    return this.u * 3.6;
+    return Math.sign(this.u) * Math.hypot(this.u, this.v) * 3.6;
+  }
+
+  // How far the car slides: the angle between its nose and its course, left +.
+  get slip() {
+    return Math.atan2(this.v, Math.max(Math.abs(this.u), SLOW));
   }
 
   velocity() {
@@ -213,6 +271,65 @@ export class Car {
     return 0.55 / (1 + Math.abs(this.u) / 18);
   }
 
+  grip() {
+    return this.track.grip[this.i] * (this.offroad ? 0.55 : 1);
+  }
+
+  // A person's hands, for the car. Keys are all or nothing and don't feel the tyres (BeamNG's and
+  // Assetto Corsa's Advanced Steering start from this too), so `steer` here is a share of what the
+  // moment calls for, not a wheel angle: with `help` on, a full key on a straight changes lanes,
+  // in a bend it follows the bend, and in a tight corner it turns as hard as the grip holds. Held
+  // through a corner it goes round it, and `edges` (like Mario Kart's Smart Steering) keeps the
+  // car on the road. With help off a full key is always the grip's limit. Braking at the same
+  // time asks for more, which turns the nose in. The AI's driver steers finely by itself and
+  // doesn't use this.
+  assist(input, help = true) {
+    if (this.u < SLOW) return input;
+    const car = this.spec;
+    const speed = Math.hypot(this.u, this.v);
+    const limit = (car.lat * this.grip()) / speed;
+    const share = clamp(input.steer, -1, 1);
+    const full = help ? Math.min(KEY_OVER * limit, KEY_BASE / speed + KEY_ROAD * speed * this.bendAhead(Math.sign(share), speed)) : limit;
+    let turn = share * full * (1 + BRAKE_TURN * input.brake);
+    let throttle = input.throttle;
+    if (help) {
+      turn = this.edges(turn);
+      // Steering into a corner the car is about as fast as it can take: no more throttle.
+      const bend = this.bendAhead(Math.sign(share), speed, this.track.lineBend);
+      const most = bend > 1e-4 ? Math.sqrt((car.lat * this.grip()) / bend) : Infinity;
+      throttle *= clamp((1 - speed / most) / KEY_EASE + 1, 1 - Math.abs(share), 1);
+    }
+    const wheel = Math.atan((turn * car.wheelbase) / this.u);
+    return { ...input, throttle, steer: clamp(wheel / this.maxSteer(), -1, 1) };
+  }
+
+  // How sharply the road (or the racing line) bends towards `side` (left +1, right -1) at its
+  // sharpest, just ahead.
+  bendAhead(side, speed, bends = this.track.roadBend) {
+    const tr = this.track;
+    const points = Math.ceil((KEY_LOOK * speed) / tr.ds);
+    let most = 0;
+    for (let k = 0; k <= points; k++) most = Math.max(most, side * bends[(this.i + k) % tr.n]);
+    return most;
+  }
+
+  // The nose's turn (`turn`, left +) kept from taking the car off the road: the nearer an edge,
+  // the slower the car may drift towards it, and it may hold any turn that does that. It does
+  // nothing in the middle of the road, or to a car pointing across it.
+  edges(turn) {
+    const tr = this.track;
+    const i = this.i;
+    const [vx, vz] = this.velocity();
+    const speed = Math.hypot(vx, vz);
+    if (vx * tr.tx[i] + vz * tr.tz[i] < 0.6 * speed) return turn;
+    const drift = vx * tr.nx[i] + vz * tr.nz[i]; // leftwards, m/s
+    const edge = tr.hw - EDGE_KEEP;
+    const road = speed * tr.roadBend[i];
+    const most = road + ((edge - this.d) / EDGE_TIME - drift) / (speed * EDGE_SOON);
+    const least = road + ((-edge - this.d) / EDGE_TIME - drift) / (speed * EDGE_SOON);
+    return most >= least ? clamp(turn, least, most) : (most + least) / 2;
+  }
+
   // Back on the road where it is, pointing the way the race goes.
   putBack() {
     const tr = this.track;
@@ -220,22 +337,35 @@ export class Car {
     const i = loc.i;
     [this.x, this.z] = tr.point(i, clamp(loc.d, -tr.hw + 1.5, tr.hw - 1.5));
     this.yaw = Math.atan2(tr.tz[i], tr.tx[i]);
-    this.u = this.v = this.spin = this.steer = 0;
+    this.u = this.v = this.spin = this.steer = this.turn = this.side = 0;
     this.stuck = this.backwards = 0;
     this.events.push({ type: "reset" });
   }
 
+  // Where to draw the car `share` of a step after the last one (the screen doesn't keep time
+  // with the 120 steps a second: drawn where the step left it, the car would judder).
+  pose(share) {
+    const was = this.was;
+    return {
+      x: was.x + (this.x - was.x) * share,
+      y: was.y + (this.y - was.y) * share,
+      z: was.z + (this.z - was.z) * share,
+      yaw: was.yaw + angleDiff(this.yaw, was.yaw) * share,
+    };
+  }
+
   step(input, dt) {
     const tr = this.track;
-    const car = tr.car;
+    const car = this.spec;
+    this.was = { x: this.x, y: this.y, z: this.z, yaw: this.yaw };
     this.input = input;
     const want = clamp(input.steer, -1, 1) * this.maxSteer();
     this.steer += clamp(want - this.steer, -3 * dt, 3 * dt);
 
-    const grip = tr.grip[this.i] * (this.offroad ? 0.55 : 1);
+    const grip = this.grip();
     const aLat = car.lat * grip;
     let a = 0;
-    if (input.throttle > 0 && this.u > -0.5) a += car.accel * (1 - this.u / car.vmax) * input.throttle * (this.sliding ? 0.5 : 1);
+    if (input.throttle > 0 && this.u > -0.5) a += car.accel * (1 - this.u / car.vmax) * input.throttle;
     if (input.brake > 0) {
       if (this.u > 0.5) a -= car.brake * grip * input.brake;
       else a -= 4 * input.brake; // backwards, slowly
@@ -244,20 +374,26 @@ export class Car {
     if (this.offroad) a -= 3 * Math.sign(this.u);
     const slope = (tr.y[(this.i + 1) % tr.n] - tr.y[this.i]) / tr.ds;
     a -= GRAVITY * slope * 0.6;
-    this.u = clamp(this.u + a * dt, -8, car.vmax);
-    if (Math.abs(this.u) < 0.05 && !input.throttle && !input.brake) this.u = 0;
+    this.ax = a;
 
-    // Turning: as much as the wheels ask, up to what the grip holds.
+    // The nose: as much as the wheels ask, up to what the grip holds at this speed and a bit
+    // more, less the further the car already slides out of the turn.
+    const slip = this.slip;
     const wantTurn = (this.u * Math.tan(this.steer)) / car.wheelbase; // left +
-    const canTurn = aLat / Math.max(Math.abs(this.u), 1);
-    const turn = clamp(wantTurn, -canTurn, canTurn);
-    const excess = Math.abs(wantTurn) - canTurn;
-    this.sliding = excess > 0.02 * canTurn && Math.abs(this.u) > 5;
-    if (excess > 0) this.u -= Math.sign(this.u) * Math.min(Math.abs(this.u), Math.min(excess * Math.abs(this.u), aLat) * 0.35 * dt);
-    this.yaw -= (turn + this.spin) * dt;
+    const out = -Math.sign(wantTurn) * slip;
+    const lead = 1 + car.agility * (1 + BRAKE_ROTATE * input.brake) * (1 - out / car.slide);
+    const most = (aLat / Math.max(Math.hypot(this.u, this.v), 1)) * Math.max(0, lead);
+    this.turn += (clamp(wantTurn, -most, most) - this.turn) * (1 - Math.exp(-dt / car.turnIn));
+
+    // The tyres: they push the car round with the nose and against any slide, up to the grip.
+    this.side = clamp(this.turn * this.u - this.v / car.settle, -aLat, aLat);
+    this.u = clamp(this.u + (a + this.turn * this.v) * dt, -8, car.vmax);
+    this.v += (this.side - this.turn * this.u) * dt;
+    if (Math.abs(this.u) < 0.05 && !input.throttle && !input.brake) this.u = 0;
+    this.sliding = Math.abs(slip) > 0.05 && Math.abs(this.u) > 5;
+    this.yaw -= (this.turn + this.spin) * dt;
     this.wallCool -= dt;
     this.spin *= Math.exp(-3 * dt);
-    this.v *= Math.exp(-4 * dt);
 
     const [vx, vz] = this.velocity();
     this.x += vx * dt;
@@ -290,33 +426,36 @@ export class Car {
       this.x -= nx * over;
       this.z -= nz * over;
       let [vx, vz] = this.velocity();
+      const speed = Math.hypot(vx, vz);
       const into = vx * nx + vz * nz;
-      // Rubbing along the wall brakes the car hard, so riding it is never quicker.
-      const rub = Math.max(0, 1 - (22 * STEP) / Math.max(Math.hypot(vx, vz), 1));
+      // The speed along the wall stays, less a share by the angle of the hit: a scrape costs a
+      // little and a head-on hit a lot. Rubbing brakes too, so riding the wall is never quicker.
+      const rub = Math.max(0, 1 - (WALL_RUB * STEP) / Math.max(speed, 1));
       vx *= rub;
       vz *= rub;
       if (into > 0) {
-        vx -= 1.3 * into * nx;
-        vz -= 1.3 * into * nz;
-        const knock = Math.max(0.4, 1 - 0.25 - 0.05 * into);
+        vx -= (1 + WALL_BOUNCE) * into * nx;
+        vz -= (1 + WALL_BOUNCE) * into * nz;
+        const sine = into / Math.max(speed, 1);
+        const knock = 1 - Math.min(WALL_LOSS_MOST, 0.3 * sine + WALL_LOSS * sine * sine);
         vx *= knock;
         vz *= knock;
-        // The nose turns a little the way the wall runs.
-        const along = Math.atan2(tr.tz[loc.i], tr.tx[loc.i]);
-        const ahead = Math.abs(angleDiff(along, this.yaw)) < Math.PI / 2 ? along : along + Math.PI;
-        this.yaw += angleDiff(ahead, this.yaw) * 0.12;
-        this.setVelocity(vx, vz);
-        if (this.wallCool <= 0) {
+        if (into > 0.5 && this.wallCool <= 0) {
           this.wallHits += 1;
           this.events.push({ type: "wall", speed: into, i: loc.i });
         }
-        this.wallCool = 0.6; // scraping along counts as one knock
+        if (into > 0.5) this.wallCool = 0.6; // scraping along counts as one knock
       }
+      // The nose turns the way the wall runs (the course stays what it is).
+      const along = Math.atan2(tr.tz[loc.i], tr.tx[loc.i]);
+      const ahead = Math.abs(angleDiff(along, this.yaw)) < Math.PI / 2 ? along : along + Math.PI;
+      this.yaw += angleDiff(ahead, this.yaw) * (1 - Math.exp(-WALL_ALIGN * STEP));
+      this.setVelocity(vx, vz);
       this.d = side * limit;
     } else if (open && Math.abs(loc.d) > tr.hw + 12) {
       this.putBack(); // left the crossing for the other road
     }
-    this.offroad = !open && Math.abs(this.d) > tr.hw;
+    this.offroad = !open && Math.abs(this.d) > tr.hw + KERB;
     this.y = tr.heightAt(this.i, this.f);
     this.pitch = Math.atan((tr.y[(this.i + 1) % tr.n] - tr.y[this.i]) / tr.ds);
   }

@@ -9,45 +9,71 @@
 
 import { clamp } from "./physics.js";
 
-// Before the model has answered: every corner at 70% of what the grip allows.
-export function cautiousPlan(track) {
+// Every corner at `share` of what the grip allows a car (`spec`: the road's car by default).
+export function gripPlan(track, share = 1, spec = track.car) {
   const speeds = {};
-  for (const c of track.corners) speeds[c.id] = Math.round(c.limit_kmh * 0.7);
+  for (const c of track.corners) speeds[c.id] = Math.round(c.limit_kmh * Math.sqrt(spec.lat / track.car.lat) * share);
   return { speeds, aggression: 1, note: "", version: 0 };
 }
+
+// Before the model has answered: every corner at 70% of what the grip allows.
+export function cautiousPlan(track) {
+  return gripPlan(track, 0.7);
+}
+
+// How the player can set the opponent: `pace` is its share of the plan's speeds (the straights'
+// too), `aggression` the most of the plan's it may use. The model's plan itself stays as it is.
+export const LEVELS = {
+  easy: { pace: 0.72, aggression: 0 },
+  normal: { pace: 0.82, aggression: 1 },
+  hard: { pace: 0.92, aggression: 2 },
+  full: { pace: 1, aggression: 3 },
+};
 
 export class Driver {
   constructor(car) {
     this.car = car;
     this.track = car.track;
+    this.level = LEVELS.full;
     this.target = new Float64Array(this.track.n);
     this.setPlan(cautiousPlan(this.track));
+  }
+
+  setLevel(level) {
+    this.level = level;
+    this.setPlan(this.plan);
+  }
+
+  aggression() {
+    return Math.min(this.plan.aggression ?? 1, this.level.aggression);
   }
 
   setPlan(plan) {
     this.plan = plan;
     const tr = this.track;
+    const spec = this.car.spec;
     const n = tr.n;
     // The straights and gentle bends drive themselves, as fast as the grip allows; the plan
     // is for the corners.
     const caps = new Float64Array(n);
     for (let i = 0; i < n; i++) {
       const bend = Math.abs(tr.lineBend[i]);
-      caps[i] = bend > 1e-5 ? Math.min(tr.car.vmax, 0.96 * Math.sqrt((tr.car.lat * tr.grip[i]) / bend)) : tr.car.vmax;
+      caps[i] = bend > 1e-5 ? Math.min(spec.vmax, 0.96 * Math.sqrt((spec.lat * tr.grip[i]) / bend)) : spec.vmax;
     }
     for (const c of tr.corners) {
       const kmh = Number(plan.speeds && plan.speeds[c.id]);
-      const v = clamp((Number.isFinite(kmh) && kmh > 0 ? kmh : c.limit_kmh * 0.7) / 3.6, 3, tr.car.vmax);
+      const v = clamp((Number.isFinite(kmh) && kmh > 0 ? kmh : c.limit_kmh * 0.7) / 3.6, 3, spec.vmax);
       for (let i = c.from; ; i = (i + 1) % n) {
         caps[i] = v;
         if (i === c.to) break;
       }
     }
+    for (let i = 0; i < n; i++) caps[i] *= this.level.pace;
     // Brake in time: from each corner back, the fastest a car can go and still slow down for it.
     for (let pass = 0; pass < 2; pass++) {
       for (let k = n - 1; k >= 0; k--) {
         const next = caps[(k + 1) % n];
-        const brake = tr.car.brake * tr.grip[k] * 0.85;
+        const brake = spec.brake * tr.grip[k] * 0.85;
         caps[k] = Math.min(caps[k], Math.sqrt(next * next + 2 * brake * tr.ds));
       }
     }
@@ -71,9 +97,9 @@ export class Driver {
     const fwd = dx * hx + dz * hz;
     const left = dx * hz - dz * hx;
     const bend = (2 * left) / Math.max(fwd * fwd + left * left, 1);
-    const steer = clamp(Math.atan(bend * tr.car.wheelbase) / car.maxSteer(), -1, 1);
+    const steer = clamp(Math.atan(bend * car.spec.wheelbase) / car.maxSteer(), -1, 1);
     let want = Math.min(this.target[car.i], this.target[tr.wrap(car.i + 2)]);
-    if (rival && (this.plan.aggression ?? 1) < 3) want = Math.min(want, this.behind(rival));
+    if (rival && this.aggression() < 3) want = Math.min(want, this.behind(rival));
     if (car.u < want - 0.4) return { throttle: 1, brake: 0, steer };
     if (car.u > want + 0.6) return { throttle: 0, brake: clamp((car.u - want) / 4, 0.3, 1), steer };
     return { throttle: 0.35, brake: 0, steer };
@@ -95,7 +121,7 @@ export class Driver {
   // 3 also aims at the car ahead or beside.
   race(rival, off, ahead) {
     const tr = this.track;
-    const level = this.plan.aggression ?? 1;
+    const level = this.aggression();
     let gap = rival.i - this.car.i;
     if (gap > tr.n / 2) gap -= tr.n;
     if (gap < -tr.n / 2) gap += tr.n;
@@ -119,6 +145,7 @@ export class Telemetry {
   constructor(car) {
     this.car = car;
     this.track = car.track;
+    this.pace = 1; // the speeds go back as if at full pace: the model plans the same at any level
     this.laps = [];
     this.start();
   }
@@ -136,7 +163,7 @@ export class Telemetry {
     const k = this.track.cornerAt[car.i];
     if (k < 0) return;
     const c = this.current[k];
-    const kmh = Math.max(0, car.u * 3.6);
+    const kmh = Math.max(0, (car.u * 3.6) / this.pace);
     if (c.entry === null) {
       c.entry = Math.round(kmh);
       c.plan = plan && plan.speeds ? Number(plan.speeds[c.id]) || null : null;

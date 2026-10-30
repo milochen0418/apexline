@@ -4,8 +4,8 @@ The model can't steer a car 120 times a second, so it plans: a speed for every c
 hard to race the person (aggression 0 to 3). The game drives by that plan
 (``assets/apexline/driver.js``); after each lap the model hears how every corner went (its
 speed into it, its lowest, whether the car slid wide or hit the wall) and may change the plan.
-It is told the physics plainly (grip × 10 m/s² sideways), so a model that reasons it out finds
-each corner's speed: √(grip × 10 × radius).
+It is told the physics plainly (grip × trackgen.CAR["lat"] m/s² sideways), so a model that
+reasons it out finds each corner's speed: √(grip × lat × radius).
 
 Mindspar-style, the game holds no model or key: it asks the hub's role ``smart``
 (``reflex_ddns_auth.ai``), and the hub's page chooses the model.
@@ -22,6 +22,10 @@ from typing import Any, AsyncIterator
 
 from reflex_ddns_auth import ai
 
+from apexline.trackgen import CAR
+
+TOP_KMH = round(CAR["vmax"] * 3.6)
+LAT, BRAKE = f"{CAR['lat']:g}", f"{CAR['brake']:g}"
 ROLE = "smart"
 USES = {ROLE: "The AI racer: it plans its speed for every corner and how hard to race you, and changes the plan after every lap"}
 # Thinking models spend most of these thinking.
@@ -34,7 +38,7 @@ SYSTEM = {
         "你是賽車遊戲「極速對決」裡的 AI 車手，對手是一位真人玩家。\n"
         "你不用自己握方向盤：電腦照你的計畫開車——沿著賽車線開、直線全油門，每個彎道用你訂的速度過彎（進彎前會自動煞到這個速度）。"
         "過彎太快，輪胎抓不住，車子會往外滑、撞牆、大幅掉速；太慢則白白浪費時間。\n"
-        "物理：車子最高 200 km/h；過彎時最大的側向加速度 = 路面抓地係數 × 10 m/s²；煞車的減速度 = 抓地係數 × 10 m/s²。\n"
+        f"物理：車子最高 {TOP_KMH} km/h；過彎時最大的側向加速度 = 路面抓地係數 × {LAT} m/s²；煞車的減速度 = 抓地係數 × {BRAKE} m/s²。\n"
         "你也決定怎麼對付對手（積極度）：0＝遠遠避開；1＝正常比賽，從空的一側超車；2＝對手緊跟在後時擋他的路；3＝故意去撞對手。"
         "撞車兩台都會掉速，也可能被撞去撞牆。\n"
         "回覆只寫下面這些行，不要寫別的：\n"
@@ -49,7 +53,7 @@ SYSTEM = {
         "You don't steer yourself: the computer drives by your plan. It follows the racing line, goes flat out on the straights, "
         "and takes every corner at the speed you set (braking to it before the corner). "
         "Too fast into a corner and the tyres can't hold: the car slides wide, hits the wall and loses a lot of speed; too slow wastes time.\n"
-        "Physics: top speed 200 km/h; the most sideways acceleration in a corner = the road's grip × 10 m/s²; braking = grip × 10 m/s².\n"
+        f"Physics: top speed {TOP_KMH} km/h; the most sideways acceleration in a corner = the road's grip × {LAT} m/s²; braking = grip × {BRAKE} m/s².\n"
         "You also decide how to race the other car (aggression): 0 = keep well clear; 1 = race clean, pass on the side with room; "
         "2 = also block them when they are right behind you; 3 = also ram them on purpose. A knock slows both cars and may push one into the wall.\n"
         "Reply with exactly these lines and nothing else:\n"

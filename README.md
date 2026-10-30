@@ -8,8 +8,8 @@ Built with [Reflex](https://reflex.dev/) and [three.js](https://threejs.org/) fo
 
 A language model can't steer 120 times a second (a thinking model like `qwen3.5:9b` takes a minute or two to answer), so the AI is **driver and engineer**:
 
-1. **Before the start it studies the track.** It is told every corner (left or right, its angle, the racing line's tightest radius, the grip, the straight before it) and the car's physics in plain words (top speed 200 km/h; the most sideways grip is grip × 10 m/s²). It answers with a speed for every corner and an **aggression** from 0 (keeps well clear of you) to 3 (rams you on purpose). The briefing shows it thinking, second by second; you may start without waiting, and it then drives carefully until its plan comes.
-2. **The game drives its car by that plan**: along the racing line, flat out on the straights, braking in time to reach each corner at the planned speed. A plan faster than the grip allows runs wide into the wall and loses time; a timid one loses time too. The right speed is √(grip × 10 × radius).
+1. **Before the start it studies the track.** It is told every corner (left or right, its angle, the racing line's tightest radius, the grip, the straight before it) and the car's physics in plain words (top speed 200 km/h; the most sideways grip is grip × 18 m/s²). It answers with a speed for every corner and an **aggression** from 0 (keeps well clear of you) to 3 (rams you on purpose). The briefing shows it thinking, second by second; you may start without waiting, and it then drives carefully until its plan comes.
+2. **The game drives its car by that plan**: along the racing line, flat out on the straights, braking in time to reach each corner at the planned speed. A plan faster than the grip allows runs wide into the wall and loses time; a timid one loses time too. The right speed is √(grip × 18 × radius).
 3. **After every lap it hears how each corner went** (its speed into it, its lowest, how far it ran off the racing line, whether it hit the wall, the gap to you and your lap time) and may change the plan for the next lap.
 4. **It remembers each track**: its last plan per model is kept, and it starts from it the next time (or studies the track again if you ask).
 
@@ -18,6 +18,11 @@ The result shows every plan next to what the grip allowed in each corner, so you
 ## 🎮 Playing
 
 - **↑ / W** throttle, **↓ / S / Space** brake, **← → / A D** steer, **R** back on the road, **Esc / P** pause, **M** sound, **C** camera, **Enter** start. A gamepad works too (left stick, triggers).
+- **Your car** (before a race and on the result): Apex GT (even at everything; the AI drives one too), Hornet (light, the best grip and brakes), Bison (the most power and top speed, heavy in corners) or Red Fox (quick, and loves to drift). Over ten tracks they are about level; each has tracks it is best on.
+- **Difficulty** (same places): Easy, Normal, Hard or All out. The AI drives at 72%, 82%, 92% or 100% of its plan's speeds, and the lower levels hold back its aggression. The model's plan stays the same.
+- **Steering help** (on by default): keys are only on or off, so a held key means what the road asks for: a lane change on a straight, the bend's own curve in a bend, the grip's limit in a tight corner. Hold up and a steering key through a corner and the car goes round it, gaining speed until the corner's limit. Near the road's edge the help keeps you on the road. Off, a full key is always the grip's limit. Too fast for a corner, you still have to brake.
+- **Driving line** (L): the racing line on the road ahead, by your speed: cyan is fine, yellow means the brakes are coming, red means brake now.
+- **Too fast?** The nose still turns in, the car slides wide and the tyres sing and take speed off it. Tap the brake while steering to turn the nose in harder. A scrape along a wall costs little; a real hit costs a lot.
 - Places, laps, lap times, speed, the AI's current plan (its version, how long it thought, its note and aggression) and a map are on screen. On a tall screen the two views stack.
 - When one car finishes, the other has 25 s to finish too.
 - The lobby shows, per track, your best time, the AI's best, your wins and losses against the model, and whether it remembers the track.
@@ -25,8 +30,15 @@ The result shows every plan next to what the grip allowed in each corner, so you
 ## 🛠️ How it is built
 
 - `apexline/trackgen.py`: the ten tracks as drawings (corners with radii, or smooth curves), made into what the game drives on: the centre line every 2 m with heights, the grip (ice, sand, snow, puddles), the racing line (the line that bends least inside the road), the corners with their limits, and where the road crosses itself. Written once to `apexline/data/tracks/*.json` (`python -m apexline.trackgen`).
-- `assets/apexline/`: the game in the browser. `physics.js` (the car: grip-limited turning, scrubbing and running wide, walls, knocks between the cars, laps), `driver.js` (the AI's driving by the plan, and its lap telemetry), `scenery.js` (ground, road, kerbs, walls, the start gantry, trees, palms, towers, lamps, sea, rain, snow), `cars.js`, `hud.js`, `input.js`, `sound.js` (Web Audio engine), `planner.js` (asking for plans), `game.js` (the race: two views, countdown, finish, result).
+- `assets/apexline/`: the game in the browser. `physics.js` (the car: turning, sliding, the steering help, walls, knocks between the cars, laps), `garage.js` (the cars), `driver.js` (the AI's driving by the plan, its level and its lap telemetry), `guide.js` (the driving line), `scenery.js` (ground, road, kerbs, walls, the start gantry, trees, palms, towers, lamps, sea, rain, snow), `cars.js`, `hud.js`, `input.js`, `sound.js` (Web Audio engine), `planner.js` (asking for plans), `game.js` (the race: two views, countdown, finish, result).
 - `apexline/strategist.py`: what the model is told (the track, then each lap) and how its plan is read; `apexline/api.py`: `GET /_apexline/track/<id>` and the streamed `POST /_apexline/plan`; `apexline/store.py`: races and remembered plans in `APEXLINE_DATA_DIR` (default `~/.local/share/apexline`).
+
+## 🏎️ Where the handling comes from
+
+- **Tyres that cancel the sideways slide, up to a cap**, so the car goes where it points until the grip runs out: [iforce2d's top-down car](https://www.iforce2d.net/b2dtut/top-down-car). The slide's angle and what it costs: [Car Physics for Games](https://www.asawicki.info/Mirror/Car%20Physics%20for%20Games/Car%20Physics%20for%20Games.html), [carphysics2d](https://github.com/spacejack/carphysics2d).
+- **Steering by what the grip can do, not a wheel angle**, because keys don't feel the tyres: [BeamNG Advanced Steering](https://github.com/adam10603/BeamNG-Advanced-Steering), [AC Advanced Gamepad Assist](https://github.com/adam10603/AC-Advanced-Gamepad-Assist); less steering at speed: [Implementing racing games](https://www.gamedeveloper.com/design/implementing-racing-games-an-intro-to-different-approaches-and-their-game-design-trade-offs).
+- **Key timing, the nose's extra turn for the eye, and cars as a class's multipliers:** [SuperTuxKart's kart_characteristics.xml](https://github.com/supertuxkart/stk-code/blob/master/data/kart_characteristics.xml).
+- **Help only near the edge, and it can be switched off:** Mario Kart's Smart Steering. **The coloured line:** Forza's driving line, in cyan rather than green for players who can't tell red from green.
 
 ## 🚀 Running it
 

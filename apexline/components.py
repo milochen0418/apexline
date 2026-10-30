@@ -9,7 +9,7 @@ nothing from a CDN at run time.
 import reflex as rx
 
 _JS = rx.asset("apexline/race.jsx")
-for _name in ("game.js", "physics.js", "driver.js", "scenery.js", "cars.js", "hud.js", "input.js", "sound.js", "planner.js", "apexline.css"):
+for _name in ("game.js", "physics.js", "driver.js", "garage.js", "guide.js", "scenery.js", "cars.js", "hud.js", "input.js", "sound.js", "planner.js", "apexline.css"):
     rx.asset(f"apexline/{_name}")
 
 LIBS = ["three@0.186.1"]

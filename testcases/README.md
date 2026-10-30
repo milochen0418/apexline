@@ -16,6 +16,7 @@ car too.
 | Suite | What it checks |
 |-------|----------------|
 | `smoke_home` | The lobby: ten tracks, the opponent from the AI Hub (or the note that there is none), the English switch; a race's briefing with both views drawn; back to the lobby, the race taken down. |
+| `keyboard_level` | Real key presses: the car and difficulty pickers work and are remembered; up and a steering key held take the car round a bend, keeping its speed, with no wall; L hides the driving line; the race runs to the result. |
 | `race_ai` | (Needs an AI Hub; skipped without one.) A whole race on the Sunny Oval against the hub's model: the AI's first plan, the race with your car on autopilot, the AI changing its plan after its laps, the result with every plan next to the limits, and the lobby showing the record and that the AI remembers the track. Several minutes with a thinking model. |
 
 ## Running

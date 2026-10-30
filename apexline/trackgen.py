@@ -32,8 +32,8 @@ DATA = Path(__file__).resolve().parent / "data" / "tracks"
 CAR = {
     "vmax": round(200 / 3.6, 3),  # m/s
     "accel": 9.0,  # m/s² from standstill, falling to 0 at vmax
-    "brake": 10.0,  # m/s² times the grip
-    "lat": 10.0,  # the most sideways acceleration, m/s² times the grip
+    "brake": 14.0,  # m/s² times the grip
+    "lat": 18.0,  # the most sideways acceleration, m/s² times the grip
     "wheelbase": 2.6,
     "length": 4.4,
     "width": 1.9,

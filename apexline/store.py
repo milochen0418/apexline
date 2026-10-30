@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+PHYSICS = 2  # raise when a car's grip or brakes change: plans remembered for other cars are dropped
 _lock = threading.Lock()
 
 
@@ -43,7 +44,11 @@ def memory(track: str, model: str) -> dict[str, Any] | None:
         return None
     with _lock:
         plan = _read_memory().get(_key(track, model))
-    return plan if isinstance(plan, dict) and isinstance(plan.get("speeds"), dict) else None
+    return plan if _fits(plan) else None
+
+
+def _fits(plan: Any) -> bool:
+    return isinstance(plan, dict) and isinstance(plan.get("speeds"), dict) and plan.get("physics") == PHYSICS
 
 
 def save_race(result: dict[str, Any]) -> None:
@@ -59,7 +64,7 @@ def save_race(result: dict[str, Any]) -> None:
         plan = result.get("plan")
         if model and isinstance(plan, dict) and isinstance(plan.get("speeds"), dict):
             mem = _read_memory()
-            mem[_key(track, model)] = {"speeds": plan["speeds"], "aggression": plan.get("aggression", 1), "note": plan.get("note", ""), "version": plan.get("version", 1), "at": record["at"]}
+            mem[_key(track, model)] = {"physics": PHYSICS, "speeds": plan["speeds"], "aggression": plan.get("aggression", 1), "note": plan.get("note", ""), "version": plan.get("version", 1), "at": record["at"]}
             tmp = path / "memory.json.tmp"
             tmp.write_text(json.dumps(mem, ensure_ascii=False, indent=1), encoding="utf-8")
             tmp.replace(path / "memory.json")
@@ -111,6 +116,6 @@ def records(model: str) -> dict[str, Record]:
         mem = _read_memory()
     for key, plan in mem.items():
         track, _, who = key.partition("|")
-        if who == model and isinstance(plan, dict):
+        if who == model and _fits(plan):
             out.setdefault(track, Record()).remembered = int(plan.get("version") or 1)
     return out

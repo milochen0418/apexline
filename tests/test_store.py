@@ -19,3 +19,11 @@ def test_races_and_the_remembered_plan(tmp_path, monkeypatch):
     other = store.records("Claude (claude-opus-5-5)")["city"]
     assert (other.ai_best, other.losses, other.remembered) == (140.0, 1, 1)
     assert store.records("nobody") ["city"].ai_best is None
+
+
+def test_a_plan_for_other_physics_is_forgotten(tmp_path, monkeypatch):
+    monkeypatch.setenv("APEXLINE_DATA_DIR", str(tmp_path))
+    store.save_race(_race("city", "m", "ai", 160.0, 150.5, {"speeds": {"C1": 60}, "version": 3}))
+    monkeypatch.setattr(store, "PHYSICS", store.PHYSICS + 1)
+    assert store.memory("city", "m") is None
+    assert store.records("m")["city"].remembered == 0

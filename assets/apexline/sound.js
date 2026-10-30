@@ -1,5 +1,6 @@
-// The engine of your car (its pitch follows the speed) and the thud of a knock, made with Web
-// Audio: nothing to download. It starts with the first click (browsers need one); M mutes.
+// The engine of your car (its pitch follows the speed), its tyres at the grip's limit (they sing
+// before they let go, the cue a wheel's force feedback gives) and the thud of a knock, made with
+// Web Audio: nothing to download. It starts with the first click (browsers need one); M mutes.
 
 const MUTE_KEY = "apexline_muted";
 
@@ -36,6 +37,30 @@ export class Sound {
     this.engineGain.connect(this.master);
     this.osc.start();
     this.osc2.start();
+    const noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    const data = noise.getChannelData(0);
+    for (let k = 0; k < data.length; k++) data[k] = Math.random() * 2 - 1;
+    this.tyre = ctx.createBufferSource();
+    this.tyre.buffer = noise;
+    this.tyre.loop = true;
+    this.tyreBand = ctx.createBiquadFilter();
+    this.tyreBand.type = "bandpass";
+    this.tyreBand.frequency.value = 1500;
+    this.tyreBand.Q.value = 7;
+    this.tyreGain = ctx.createGain();
+    this.tyreGain.gain.value = 0;
+    this.tyre.connect(this.tyreBand);
+    this.tyreBand.connect(this.tyreGain);
+    this.tyreGain.connect(this.master);
+    this.tyre.start();
+  }
+
+  // `amount`: 0 quiet, 1 a full slide.
+  tyres(amount) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    this.tyreGain.gain.setTargetAtTime(amount * 0.28, now, 0.05);
+    this.tyreBand.frequency.setTargetAtTime(1300 + amount * 800, now, 0.08);
   }
 
   engine(kmh, throttle, running) {

@@ -1,5 +1,6 @@
 // The driver's hands: arrow keys or WASD (Space brakes too), R puts the car back on the road,
-// Esc or P pauses, M mutes, C changes the camera; a gamepad works too (left stick, triggers).
+// Esc or P pauses, M mutes, C changes the camera, L shows the driving line; a gamepad works too
+// (left stick, triggers).
 
 const KEYS = {
   ArrowUp: "up",
@@ -24,7 +25,7 @@ export class Input {
       if (k) {
         this.held.add(k);
         e.preventDefault();
-      } else if (!e.repeat && ["KeyR", "Escape", "KeyP", "KeyM", "KeyC", "Enter"].includes(e.code)) {
+      } else if (!e.repeat && ["KeyR", "Escape", "KeyP", "KeyM", "KeyC", "KeyL", "Enter"].includes(e.code)) {
         this.onKey(e.code);
         if (e.code !== "Escape") e.preventDefault();
       }
@@ -39,8 +40,10 @@ export class Input {
     window.addEventListener("blur", this.blur);
   }
 
-  // Throttle, brake and steering for this moment (steering eases in, so a tap is a small turn).
-  read(dt) {
+  // Throttle, brake and steering for this moment. A key is only on or off, so the steering eases
+  // (SuperTuxKart's time-full-steer and time-reset-steer): back to the middle quickly, away from
+  // it more gently the faster the car goes (`speed`, m/s), so a tap is a small correction.
+  read(dt, speed = 0) {
     let throttle = this.held.has("up") ? 1 : 0;
     let brake = this.held.has("down") ? 1 : 0;
     let want = (this.held.has("left") ? 1 : 0) - (this.held.has("right") ? 1 : 0);
@@ -53,7 +56,8 @@ export class Input {
       brake = Math.max(brake, pad.buttons[6]?.value || 0, pad.buttons[1]?.pressed ? 1 : 0);
       break;
     }
-    const rate = want === 0 ? 6 : Math.sign(want) !== Math.sign(this.steer) ? 8 : 3.5;
+    const back = want * this.steer < 0 || Math.abs(want) < Math.abs(this.steer);
+    const rate = back ? 7 : 1 / (0.1 + 0.12 * Math.min(1, speed / 42));
     this.steer += Math.max(-rate * dt, Math.min(rate * dt, want - this.steer));
     return { throttle, brake, steer: this.steer };
   }
