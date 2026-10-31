@@ -14,7 +14,8 @@ from common import finish, launch, log, new_page, open_lobby, shot, wait_for  # 
 errors: list[str] = []
 with sync_playwright() as pw:
     browser = launch(pw)
-    page = new_page(browser, errors, width=1440, height=900)
+    # A small window: this suite waits on the clock, and headless Chromium draws in software.
+    page = new_page(browser, errors, width=900, height=640)
     open_lobby(page)
     page.click("[data-testid=race-sunny_oval]")
     page.wait_for_selector("[data-testid=briefing]", timeout=90000)

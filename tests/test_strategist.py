@@ -75,3 +75,27 @@ def test_a_long_conversation_keeps_its_start_and_its_end():
     kept = strategist.trim(history)
     assert [m["content"] for m in kept[:2]] == ["0", "1"]
     assert kept[-1]["content"] == "29" and len(kept) == strategist.KEEP + 2
+
+
+BISON = {"id": "bison", "name": "野牛", "top": 220, "lat": 16, "brake": 12}
+
+
+def test_the_model_is_told_the_car_it_drives():
+    text = strategist.system("zh", strategist.car_from(BISON))
+    assert "「野牛」" in text and "最高 220 km/h" in text and "× 16 m/s²" in text and "× 12 m/s²" in text
+    road = strategist.system("en", strategist.DrivenCar())
+    assert "top speed 200 km/h" in road and "× 18 m/s²" in road and "× 14 m/s²" in road and "You drive" not in road
+
+
+def test_what_does_not_read_as_a_car_is_the_road_car():
+    for bad in (None, "bison", {"id": "../x", "top": 220, "lat": 16, "brake": 12}, {"id": "bison", "top": "fast", "lat": 16, "brake": 12}, {**BISON, "lat": 1e9}, {**BISON, "brake": True}):
+        assert strategist.car_from(bad) == strategist.DrivenCar()
+
+
+def test_speeds_are_kept_sane_for_the_car_driven():
+    t = _track()
+    ids = [c["id"] for c in t["corners"]]
+    bison = strategist.car_from(BISON)
+    plan = strategist.parse("\n".join(f"{cid}: 9000" for cid in ids[:-1]), t, None, bison)
+    assert plan.speeds[ids[0]] == 220, "its own top speed"
+    assert plan.speeds[ids[-1]] == round(t["corners"][-1]["limit_kmh"] * (16 / 18) ** 0.5 * 0.7), "a gap: 70% of its own limit"

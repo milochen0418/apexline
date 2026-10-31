@@ -3,8 +3,9 @@ the App Store keeps it in a volume):
 
 - ``races.jsonl``: one finished race a line, as the game reports it (``game.js`` ``finish``):
   ``{"track", "model", "winner", "you": {"time", "best", ...}, "ai": {...}, "plans", "plan"}``;
-- ``memory.json``: the last plan each model drove on each track, which it starts from the next
-  time it races there (it "remembers the track").
+- ``memory.json``: the last plan each model drove on each track in each car, which it starts
+  from the next time it races there in that car (it "remembers the track"). A plan is worth
+  nothing in another car: their grip differs.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 PHYSICS = 2  # raise when a car's grip or brakes change: plans remembered for other cars are dropped
+ROAD_CAR = "gt"
 _lock = threading.Lock()
 
 
@@ -25,8 +27,9 @@ def data_dir() -> Path:
     return Path(os.environ.get("APEXLINE_DATA_DIR") or Path.home() / ".local" / "share" / "apexline")
 
 
-def _key(track: str, model: str) -> str:
-    return f"{track}|{model}"
+def _key(track: str, model: str, car: str) -> str:
+    # The road's car keeps the key it had when it was the only one.
+    return f"{track}|{model}" if car == ROAD_CAR else f"{track}|{model}|{car}"
 
 
 def _read_memory() -> dict[str, Any]:
@@ -38,12 +41,12 @@ def _read_memory() -> dict[str, Any]:
         return {}
 
 
-def memory(track: str, model: str) -> dict[str, Any] | None:
-    """The plan ``model`` last drove on ``track``, or None."""
+def memory(track: str, model: str, car: str = ROAD_CAR) -> dict[str, Any] | None:
+    """The plan ``model`` last drove on ``track`` in ``car``, or None."""
     if not model:
         return None
     with _lock:
-        plan = _read_memory().get(_key(track, model))
+        plan = _read_memory().get(_key(track, model, car))
     return plan if _fits(plan) else None
 
 
@@ -64,7 +67,8 @@ def save_race(result: dict[str, Any]) -> None:
         plan = result.get("plan")
         if model and isinstance(plan, dict) and isinstance(plan.get("speeds"), dict):
             mem = _read_memory()
-            mem[_key(track, model)] = {"physics": PHYSICS, "speeds": plan["speeds"], "aggression": plan.get("aggression", 1), "note": plan.get("note", ""), "version": plan.get("version", 1), "at": record["at"]}
+            car = str(result.get("ai_car") or ROAD_CAR)
+            mem[_key(track, model, car)] = {"physics": PHYSICS, "car": car, "speeds": plan["speeds"], "aggression": plan.get("aggression", 1), "note": plan.get("note", ""), "version": plan.get("version", 1), "at": record["at"]}
             tmp = path / "memory.json.tmp"
             tmp.write_text(json.dumps(mem, ensure_ascii=False, indent=1), encoding="utf-8")
             tmp.replace(path / "memory.json")
@@ -92,7 +96,7 @@ class Record:
     ai_best: float | None = None  # the model's fastest
     wins: int = 0  # your wins against the model
     losses: int = 0
-    remembered: int = 0  # the version of the plan the model remembers (0: none)
+    remembered: int = 0  # the newest version of the plans the model remembers, in any car (0: none)
 
 
 def records(model: str) -> dict[str, Record]:
@@ -115,7 +119,8 @@ def records(model: str) -> dict[str, Record]:
     with _lock:
         mem = _read_memory()
     for key, plan in mem.items():
-        track, _, who = key.partition("|")
+        track, who, *_ = key.split("|")
         if who == model and _fits(plan):
-            out.setdefault(track, Record()).remembered = int(plan.get("version") or 1)
+            rec = out.setdefault(track, Record())
+            rec.remembered = max(rec.remembered, int(plan.get("version") or 1))
     return out

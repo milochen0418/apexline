@@ -14,12 +14,12 @@ Built with [Reflex](https://reflex.dev/) and [three.js](https://threejs.org/) fo
 
 A language model can't steer 120 times a second (a thinking model like `qwen3.5:9b` takes a minute or two to answer), so the AI is **driver and engineer**:
 
-<p align="center"><img src="docs/images/briefing.jpg" width="760" alt="The briefing panel: the AI has its plan after 3 seconds of thinking and quotes its note; below are the four cars, the difficulty and the aids"></p>
+<p align="center"><img src="docs/images/briefing.jpg" width="760" alt="The briefing panel: the AI has its plan after 2 seconds of thinking and quotes its note; below, your Hornet on the left and the AI's Bison on the right, each with the four to pick from, then the difficulty and the aids"></p>
 
-1. **Before the start it studies the track.** It is told every corner (left or right, its angle, the racing line's tightest radius, the grip, the straight before it) and the car's physics in plain words (top speed 200 km/h; the most sideways grip is grip × 18 m/s²). It answers with a speed for every corner and an **aggression** from 0 (keeps well clear of you) to 3 (rams you on purpose). The briefing shows it thinking, second by second; you may start without waiting, and it then drives carefully until its plan comes.
-2. **The game drives its car by that plan**: along the racing line, flat out on the straights, braking in time to reach each corner at the planned speed. A plan faster than the grip allows runs wide into the wall and loses time; a timid one loses time too. The right speed is √(grip × 18 × radius).
+1. **Before the start it studies the track.** It is told every corner (left or right, its angle, the racing line's tightest radius, the grip, the straight before it) and the physics of the car you gave it in plain words (for the Apex GT: top speed 200 km/h; the most sideways grip is grip × 18 m/s²). It answers with a speed for every corner and an **aggression** from 0 (keeps well clear of you) to 3 (rams you on purpose). The briefing shows it thinking, second by second; you may start without waiting, and it then drives carefully until its plan comes.
+2. **The game drives its car by that plan**: along the racing line, flat out on the straights, braking in time to reach each corner at the planned speed. A plan faster than the grip allows runs wide into the wall and loses time; a timid one loses time too. The right speed is √(grip × that car's cornering grip × radius).
 3. **After every lap it hears how each corner went** (its speed into it, its lowest, how far it ran off the racing line, whether it hit the wall, the gap to you and your lap time) and may change the plan for the next lap.
-4. **It remembers each track**: its last plan per model is kept, and it starts from it the next time (or studies the track again if you ask).
+4. **It remembers each track**: its last plan per model and car is kept, and it starts from it the next time (or studies the track again if you ask). A plan is for one car: give it another and it works the track out again.
 
 The result shows every plan next to what the grip allowed in each corner, so you see how well the model worked it out. In the first tests `qwen3.5:9b` thought 127 s about the Sunny Oval and planned exactly the grip's limit for both turns.
 
@@ -57,9 +57,13 @@ A smaller model gets it wrong, and that is worth watching too. Above, `qwen2.5:7
 <p align="center"><img src="docs/images/split-screen.jpg" width="820" alt="The race on one screen: your car on the left, the AI's on the right, places, lap times, speed, the map and the AI's current plan"></p>
 
 - **↑ / W** throttle, **↓ / S / Space** brake, **← → / A D** steer, **R** back on the road, **Esc / P** pause, **M** sound, **C** camera, **Enter** start. A gamepad works too (left stick, triggers).
-- **Your car** (before a race and on the result): Apex GT (even at everything; the AI drives one too), Hornet (light, the best grip and brakes), Bison (the most power and top speed, heavy in corners) or Red Fox (quick, and loves to drift). Over ten tracks they are about level; each has tracks it is best on.
+- **Two garages** (before a race and on the result): pick your car on the left and **the AI's car on the right**, the same four for both, so you can race it in any match-up. Yours wears warm colours and the AI's cool ones, so two of the same car are still told apart. Over ten tracks the cars are about level; each has tracks it is best on.
+  - **Apex GT**, a long-nosed grand tourer: even at everything.
+  - **Hornet**, a small open single-seater with its wheels in the wind: light, the best grip and brakes.
+  - **Bison**, an American muscle car with a blower through its bonnet: the most power and top speed, heavy in corners.
+  - **Red Fox**, a wide rally hatch with a rack of lamps and a tall wing: quick, and loves to drift.
 
-  <p align="center"><img src="docs/images/cars.jpg" width="760" alt="The four cars seen from the front: red Apex GT, orange Hornet, dark red Bison and pink Red Fox in a slide"></p>
+  <p align="center"><img src="docs/images/cars.jpg" width="760" alt="The four cars on the track: the red Apex GT, the yellow Hornet with the AI's blue one behind it, the bronze Bison and the orange Red Fox"></p>
 
   | Car | Top speed | Acceleration | Braking | Cornering grip |
   | --- | --- | --- | --- | --- |
@@ -71,7 +75,7 @@ A smaller model gets it wrong, and that is worth watching too. Above, `qwen2.5:7
 - **Difficulty** (same places): Easy, Normal, Hard or All out. The AI drives at 72%, 82%, 92% or 100% of its plan's speeds, and the lower levels hold back its aggression. The model's plan stays the same.
 - **Steering help** (on by default): keys are only on or off, so a held key means what the road asks for: a lane change on a straight, the bend's own curve in a bend, the grip's limit in a tight corner. Hold up and a steering key through a corner and the car goes round it, gaining speed until the corner's limit. Near the road's edge the help keeps you on the road. Off, a full key is always the grip's limit. Too fast for a corner, you still have to brake.
 
-  <p align="center"><img src="docs/images/keyboard.jpg" width="620" alt="Up and right held through the Sunny Oval's bend: the car follows the curve at 153 km/h"></p>
+  <p align="center"><img src="docs/images/keyboard.jpg" width="620" alt="Up and right held through the Sunny Oval's bend: the car follows the curve at 148 km/h"></p>
 
 - **Driving line** (L): the racing line on the road ahead, by your speed: cyan is fine, yellow means the brakes are coming, red means brake now.
 
@@ -87,8 +91,9 @@ A smaller model gets it wrong, and that is worth watching too. Above, `qwen2.5:7
 ## 🛠️ How it is built
 
 - `apexline/trackgen.py`: the ten tracks as drawings (corners with radii, or smooth curves), made into what the game drives on: the centre line every 2 m with heights, the grip (ice, sand, snow, puddles), the racing line (the line that bends least inside the road), the corners with their limits, and where the road crosses itself. Written once to `apexline/data/tracks/*.json` (`python -m apexline.trackgen`).
-- `assets/apexline/`: the game in the browser. `physics.js` (the car: turning, sliding, the steering help, walls, knocks between the cars, laps), `garage.js` (the cars), `driver.js` (the AI's driving by the plan, its level and its lap telemetry), `guide.js` (the driving line), `scenery.js` (ground, road, kerbs, walls, the start gantry, trees, palms, towers, lamps, sea, rain, snow), `cars.js`, `hud.js`, `input.js`, `sound.js` (Web Audio engine), `planner.js` (asking for plans), `game.js` (the race: two views, countdown, finish, result).
-- `apexline/strategist.py`: what the model is told (the track, then each lap) and how its plan is read; `apexline/api.py`: `GET /_apexline/track/<id>` and the streamed `POST /_apexline/plan`; `apexline/store.py`: races and remembered plans in `APEXLINE_DATA_DIR` (default `~/.local/share/apexline`).
+- `assets/apexline/`: the game in the browser. `physics.js` (the car: turning, sliding, the steering help, walls, knocks between the cars, laps), `garage.js` (the cars' numbers), `driver.js` (the AI's driving by the plan, its level and its lap telemetry), `guide.js` (the driving line), `scenery.js` (ground, road, kerbs, walls, the start gantry, trees, palms, towers, lamps, sea, rain, snow), `hud.js`, `input.js`, `sound.js` (Web Audio engine), `planner.js` (asking for plans), `game.js` (the race: two views, countdown, finish, result).
+- The cars are made in the browser, with no model files: `bodywork.js` lofts a body from a few curves along the car (deck, width, sill) and cuts its wheel arches, `carshapes.js` has the four shapes and their paint jobs, `livery.js` draws a paint job on a canvas as plans of the car (sides, top, front, rear) and wraps it on from outside, along with what each part of the surface is like (clear coat, roughness, metal), `wheels.js` makes each car's rims, tyres and brakes, and `cars.js` puts it all together: the reflections of the track's own sky, the lamps, the body on its springs, a coarser body far away and the pictures in the picker.
+- `apexline/strategist.py`: what the model is told (its car, the track, then each lap) and how its plan is read; `apexline/api.py`: `GET /_apexline/track/<id>` and the streamed `POST /_apexline/plan`; `apexline/store.py`: races and remembered plans in `APEXLINE_DATA_DIR` (default `~/.local/share/apexline`).
 
 ## 🏎️ Where the handling comes from
 
@@ -124,6 +129,8 @@ DDNS_AI_HUB_URL=… DDNS_AUTH_SECRET=… SERVICE_SUBDOMAIN=apexline poetry run .
 See [testcases/README.md](testcases/README.md).
 
 ## 🎬 The film
+
+The film was made before the cars were redrawn: it shows the first, boxier ones, and the AI in the only car it had then. The pictures on this page are of the cars as they are now.
 
 [The film on YouTube](https://www.youtube.com/watch?v=dTvia4_5Iaw) was recorded live at `https://apexline.reflex-ddns.com` in a real browser, with the app's real model (`qwen2.5:7b` on Ollama): every plan, thinking time and result on screen is what happened. A script drives the red car, and some shots use film cameras added for the video, drawn by the game's own renderer. Narration: Qwen3-TTS (voice Aiden). Music: "Sports Highlights" by Ahjay Stelino, [Mixkit Stock Music Free License](https://mixkit.co/license/#musicFree). Type: Barlow (SIL OFL).
 

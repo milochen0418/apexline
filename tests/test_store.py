@@ -27,3 +27,21 @@ def test_a_plan_for_other_physics_is_forgotten(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "PHYSICS", store.PHYSICS + 1)
     assert store.memory("city", "m") is None
     assert store.records("m")["city"].remembered == 0
+
+
+def test_each_car_has_its_own_plan(tmp_path, monkeypatch):
+    monkeypatch.setenv("APEXLINE_DATA_DIR", str(tmp_path))
+    store.save_race({**_race("city", "m", "ai", 160.0, 150.5, {"speeds": {"C1": 60}, "version": 2}), "ai_car": "gt"})
+    store.save_race({**_race("city", "m", "ai", 160.0, 152.0, {"speeds": {"C1": 66}, "version": 5}), "ai_car": "hornet"})
+    assert store.memory("city", "m")["speeds"] == {"C1": 60}
+    assert store.memory("city", "m", "hornet")["speeds"] == {"C1": 66}
+    assert store.memory("city", "m", "bison") is None
+    assert store.records("m")["city"].remembered == 5, "the lobby: it remembers the track in some car"
+
+
+def test_a_plan_remembered_before_there_was_a_choice_is_the_road_cars(tmp_path, monkeypatch):
+    monkeypatch.setenv("APEXLINE_DATA_DIR", str(tmp_path))
+    (tmp_path / "memory.json").write_text('{"city|m": {"physics": %d, "speeds": {"C1": 60}, "version": 3}}' % store.PHYSICS)
+    assert store.memory("city", "m")["version"] == 3
+    assert store.memory("city", "m", "gt")["version"] == 3
+    assert store.records("m")["city"].remembered == 3

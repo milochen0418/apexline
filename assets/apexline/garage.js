@@ -1,25 +1,20 @@
-// The cars a person can pick. As SuperTuxKart's kart classes (light, medium, heavy) do, each is
-// the road's car (pack.car, the one the AI drives) with some numbers changed: `times` multiply
-// the road's car, the rest replace physics.js's HANDLING. No car is best everywhere: tight tracks
-// suit the light one, long straights the strong one (tests/js/physics.test.mjs checks that).
+// The cars, for you and for the AI. As SuperTuxKart's kart classes (light, medium, heavy) do, each
+// is the road's car (pack.car, the one the track's limits are worked out for) with some numbers
+// changed: `times` multiply the road's car, the rest replace physics.js's HANDLING. No car is best
+// everywhere: tight tracks suit the light one, long straights the strong one
+// (tests/js/physics.test.mjs checks that). What they look like is carshapes.js.
 
 export const CARS = {
-  gt: { paint: "#dc2626", accent: "#fecaca", times: {}, handling: {} },
+  gt: { times: {}, handling: {} },
   hornet: {
-    paint: "#f97316",
-    accent: "#ffedd5",
     times: { vmax: 0.9, accel: 0.95, brake: 1.15, lat: 1.09 },
     handling: { turnIn: 0.045, agility: 1.1 },
   },
   bison: {
-    paint: "#7f1d1d",
-    accent: "#fde68a",
     times: { vmax: 1.1, accel: 1.25, brake: 0.86, lat: 0.89 },
     handling: { turnIn: 0.085, slide: 0.34 },
   },
   fox: {
-    paint: "#db2777",
-    accent: "#fce7f3",
     times: { vmax: 0.98, accel: 1.14, brake: 0.98, lat: 0.98 },
     handling: { turnIn: 0.05, slide: 0.42, agility: 1.6, settle: 0.26 },
   },

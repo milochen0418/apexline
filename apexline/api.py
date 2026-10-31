@@ -3,9 +3,9 @@ here behind re-ddns):
 
 - ``GET /_apexline/track/<id>``: a track as the game drives it (``apexline/data/tracks``);
 - ``POST /_apexline/plan``: the AI's plan, streamed as lines of JSON (:mod:`apexline.strategist`).
-  ``{track, lang, history, report, plan, fresh, lap}``; with no conversation yet and no lap, the
-  plan the answering model remembers for this track comes back at once (``"cached": true``),
-  unless ``fresh``.
+  ``{track, lang, car, history, report, plan, fresh, lap}``; with no conversation yet and no lap,
+  the plan the answering model remembers for this track and car comes back at once
+  (``"cached": true``), unless ``fresh``.
 """
 
 from __future__ import annotations
@@ -70,14 +70,15 @@ async def plan(request: Request) -> Response:
     history = body.get("history") if isinstance(body.get("history"), list) else []
     report = body.get("report") if isinstance(body.get("report"), dict) else None
     current = body.get("plan") if isinstance(body.get("plan"), dict) else None
+    car = strategist.car_from(body.get("car"))
     headers = {"Cache-Control": "no-store", "X-Accel-Buffering": "no"}
     if not history and report is None and not body.get("fresh"):
         status = await ai.status(strategist.ROLE)
         model = str((status or {}).get("model") or "") if (status or {}).get("ok") else ""
-        remembered = store.memory(pack["id"], model)
+        remembered = store.memory(pack["id"], model, car.id)
         if remembered:
             return StreamingResponse(_lines(_remembered(remembered, model)), media_type="application/x-ndjson", headers=headers)
-    events = strategist.plan_lines(pack, lang, history, report, current)
+    events = strategist.plan_lines(pack, lang, history, report, current, car)
     return StreamingResponse(_lines(events), media_type="application/x-ndjson", headers=headers)
 
 

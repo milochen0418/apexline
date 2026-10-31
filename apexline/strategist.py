@@ -4,8 +4,9 @@ The model can't steer a car 120 times a second, so it plans: a speed for every c
 hard to race the person (aggression 0 to 3). The game drives by that plan
 (``assets/apexline/driver.js``); after each lap the model hears how every corner went (its
 speed into it, its lowest, whether the car slid wide or hit the wall) and may change the plan.
-It is told the physics plainly (grip × trackgen.CAR["lat"] m/s² sideways), so a model that
-reasons it out finds each corner's speed: √(grip × lat × radius).
+It is told the physics of the car it drives this race (the person picks it; the game sends its
+numbers: ``DrivenCar``), so a model that reasons it out finds each corner's speed:
+√(grip × lat × radius).
 
 Mindspar-style, the game holds no model or key: it asks the hub's role ``smart``
 (``reflex_ddns_auth.ai``), and the hub's page chooses the model.
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import math
 import re
 import time
 import unicodedata
@@ -25,7 +27,6 @@ from reflex_ddns_auth import ai
 from apexline.trackgen import CAR
 
 TOP_KMH = round(CAR["vmax"] * 3.6)
-LAT, BRAKE = f"{CAR['lat']:g}", f"{CAR['brake']:g}"
 ROLE = "smart"
 USES = {ROLE: "The AI racer: it plans its speed for every corner and how hard to race you, and changes the plan after every lap"}
 # Thinking models spend most of these thinking.
@@ -38,7 +39,7 @@ SYSTEM = {
         "你是賽車遊戲「極速對決」裡的 AI 車手，對手是一位真人玩家。\n"
         "你不用自己握方向盤：電腦照你的計畫開車——沿著賽車線開、直線全油門，每個彎道用你訂的速度過彎（進彎前會自動煞到這個速度）。"
         "過彎太快，輪胎抓不住，車子會往外滑、撞牆、大幅掉速；太慢則白白浪費時間。\n"
-        f"物理：車子最高 {TOP_KMH} km/h；過彎時最大的側向加速度 = 路面抓地係數 × {LAT} m/s²；煞車的減速度 = 抓地係數 × {BRAKE} m/s²。\n"
+        "{car}物理：車子最高 {top} km/h；過彎時最大的側向加速度 = 路面抓地係數 × {lat} m/s²；煞車的減速度 = 抓地係數 × {brake} m/s²。\n"
         "你也決定怎麼對付對手（積極度）：0＝遠遠避開；1＝正常比賽，從空的一側超車；2＝對手緊跟在後時擋他的路；3＝故意去撞對手。"
         "撞車兩台都會掉速，也可能被撞去撞牆。\n"
         "回覆只寫下面這些行，不要寫別的：\n"
@@ -53,7 +54,7 @@ SYSTEM = {
         "You don't steer yourself: the computer drives by your plan. It follows the racing line, goes flat out on the straights, "
         "and takes every corner at the speed you set (braking to it before the corner). "
         "Too fast into a corner and the tyres can't hold: the car slides wide, hits the wall and loses a lot of speed; too slow wastes time.\n"
-        f"Physics: top speed {TOP_KMH} km/h; the most sideways acceleration in a corner = the road's grip × {LAT} m/s²; braking = grip × {BRAKE} m/s².\n"
+        "{car}Physics: top speed {top} km/h; the most sideways acceleration in a corner = the road's grip × {lat} m/s²; braking = grip × {brake} m/s².\n"
         "You also decide how to race the other car (aggression): 0 = keep well clear; 1 = race clean, pass on the side with room; "
         "2 = also block them when they are right behind you; 3 = also ram them on purpose. A knock slows both cars and may push one into the wall.\n"
         "Reply with exactly these lines and nothing else:\n"
@@ -64,6 +65,41 @@ SYSTEM = {
         "Note: <one sentence on your thinking>"
     ),
 }
+
+CAR_LINE = {"zh": "這場你開的車是「{name}」。\n", "en": "You drive the {name} this race.\n"}
+
+
+@dataclasses.dataclass(frozen=True)
+class DrivenCar:
+    """The car the AI drives, as the game says it (``game.js`` aiCarFacts, ``garage.js``)."""
+
+    id: str = "gt"
+    name: str = ""
+    top: int = TOP_KMH  # km/h
+    lat: float = CAR["lat"]
+    brake: float = CAR["brake"]
+
+    def limit(self, corner: dict) -> float:
+        """What the grip allows this car in a corner: the track's figure is for trackgen.CAR."""
+        return corner["limit_kmh"] * math.sqrt(self.lat / CAR["lat"])
+
+
+def car_from(value: Any) -> DrivenCar:
+    """The car in a request; anything that doesn't read as one is the road's car."""
+    if not isinstance(value, dict):
+        return DrivenCar()
+    numbers = [value.get(key) for key in ("top", "lat", "brake")]
+    if not re.fullmatch(r"[a-z0-9_]{1,24}", str(value.get("id"))) or not all(isinstance(n, (int, float)) and not isinstance(n, bool) and 1 <= n <= 500 for n in numbers):
+        return DrivenCar()
+    name = re.sub(r"[\x00-\x1f]", "", str(value.get("name") or ""))[:30]
+    return DrivenCar(str(value["id"]), name, round(numbers[0]), float(numbers[1]), float(numbers[2]))
+
+
+def system(lang: str, car: DrivenCar) -> str:
+    """What the model is told once, with its car's numbers."""
+    line = CAR_LINE[lang].format(name=car.name) if car.name else ""
+    return SYSTEM[lang].format(car=line, top=car.top, lat=f"{car.lat:g}", brake=f"{car.brake:g}")
+
 
 ZONE_WORDS = {"zh": {"sand": "沙地", "snow": "雪地", "puddle": "積水", "ice": "冰面"}, "en": {"sand": "sand", "snow": "snow", "puddle": "puddles", "ice": "ice"}}
 
@@ -180,7 +216,7 @@ _NOTE = re.compile(r"^\s*(?:說明|理由|想法|note|reason|why)\s*[:：]\s*(.+
 _THINKING = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 
-def parse(text: str, track: dict, previous: dict | None = None) -> Plan | None:
+def parse(text: str, track: dict, previous: dict | None = None, car: DrivenCar = DrivenCar()) -> Plan | None:
     """The plan in the model's reply, or None when it gave speeds for fewer than half the
     corners. A corner it left out keeps the previous plan's speed (or 70% of its limit)."""
     clean = unicodedata.normalize("NFKC", _THINKING.sub("", text or "")).replace("**", "").replace("`", "")
@@ -189,7 +225,7 @@ def parse(text: str, track: dict, previous: dict | None = None) -> Plan | None:
     for num, value in _CORNER.findall(clean):
         key = f"C{int(num)}"
         if key in ids and key not in found:
-            found[key] = int(max(10, min(200, round(float(value)))))
+            found[key] = int(max(10, min(car.top, round(float(value)))))
     if len(found) * 2 < len(ids):
         return None
     before = (previous or {}).get("speeds") or {}
@@ -198,7 +234,7 @@ def parse(text: str, track: dict, previous: dict | None = None) -> Plan | None:
         if c["id"] in found:
             speeds[c["id"]] = found[c["id"]]
         else:
-            speeds[c["id"]] = int(before.get(c["id"]) or round(c["limit_kmh"] * 0.7))
+            speeds[c["id"]] = int(before.get(c["id"]) or round(car.limit(c) * 0.7))
     m = _AGGRESSION.search(clean)
     aggression = int(m.group(1)) if m else int((previous or {}).get("aggression", 1))
     note = _NOTE.search(_THINKING.sub("", text or "").replace("**", "").replace("`", ""))  # as written: "，" stays
@@ -215,13 +251,13 @@ def trim(history: list[dict[str, str]]) -> list[dict[str, str]]:
     return ok
 
 
-async def _ask(messages: list[dict[str, str]], lang: str) -> tuple[str, str, str]:
-    reply = ai.stream(ROLE, SYSTEM[lang], messages, max_tokens=MAX_TOKENS)
+async def _ask(messages: list[dict[str, str]], lang: str, car: DrivenCar) -> tuple[str, str, str]:
+    reply = ai.stream(ROLE, system(lang, car), messages, max_tokens=MAX_TOKENS)
     text = "".join([piece async for piece in reply])
     return text, reply.model, reply.stop
 
 
-async def plan_lines(track: dict, lang: str, history: list[dict[str, str]], report: dict | None, plan: dict | None) -> AsyncIterator[dict[str, Any]]:
+async def plan_lines(track: dict, lang: str, history: list[dict[str, str]], report: dict | None, plan: dict | None, car: DrivenCar = DrivenCar()) -> AsyncIterator[dict[str, Any]]:
     """The answer as the game reads it: ``{"t": seconds}`` while the model thinks, then
     ``{"plan", "model", "secs", "said", "reply"}`` or ``{"error"}``. Stopping early (the race
     left) cancels the question, and the hub stops the model."""
@@ -229,7 +265,7 @@ async def plan_lines(track: dict, lang: str, history: list[dict[str, str]], repo
     history = trim(history)
     said = user_message(track, lang, history, report, plan)
     started = time.monotonic()
-    task = asyncio.create_task(_ask([*history, {"role": "user", "content": said}], lang))
+    task = asyncio.create_task(_ask([*history, {"role": "user", "content": said}], lang, car))
     try:
         while not task.done():
             done, _ = await asyncio.wait({task}, timeout=HEARTBEAT)
@@ -247,7 +283,7 @@ async def plan_lines(track: dict, lang: str, history: list[dict[str, str]], repo
         if not task.done():
             task.cancel()
     secs = round(time.monotonic() - started, 1)
-    parsed = parse(text, track, plan)
+    parsed = parse(text, track, plan, car)
     if parsed is None:
         why = "想太久，字數用完了還沒寫出計畫" if lang == "zh" and stop == "max_tokens" else "thought so long it ran out of room" if stop == "max_tokens" else ("回答裡找不到計畫" if lang == "zh" else "no plan in its answer")
         yield {"error": why, "reply": text[:500], "model": model, "secs": secs}

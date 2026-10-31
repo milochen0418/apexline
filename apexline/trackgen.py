@@ -28,7 +28,8 @@ DS = 2.0  # metres between points
 SHOULDER = 3.0  # grass or sand between the road's edge and the wall
 DATA = Path(__file__).resolve().parent / "data" / "tracks"
 
-# The car, the same for both drivers (assets/apexline/physics.js reads these from the track).
+# The road's car: the limits are worked out for it, and the cars of assets/apexline/garage.js are it
+# with some numbers changed (assets/apexline/physics.js reads these from the track).
 CAR = {
     "vmax": round(200 / 3.6, 3),  # m/s
     "accel": 9.0,  # m/s² from standstill, falling to 0 at vmax

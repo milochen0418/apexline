@@ -3,13 +3,14 @@
 // thinks, then {"plan": ..., "model", "secs", "said", "reply"} or {"error"}. The conversation
 // (what the game said, what the model answered) is kept here and sent each time, so the model
 // sees its earlier plans and how they went. Leaving the race cancels the question, which stops
-// the model too.
+// the model too. `car()` says which car the AI drives, as the model is told it.
 
 export class Planner {
-  constructor({ backend, track, lang, onState }) {
+  constructor({ backend, track, lang, car, onState }) {
     this.url = new URL("/_apexline/plan", backend || window.location.origin).toString();
     this.track = track;
     this.lang = lang;
+    this.car = car;
     this.onState = onState;
     this.history = [];
     this.busy = false;
@@ -27,7 +28,7 @@ export class Planner {
       const res = await fetch(this.url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ track: this.track, lang: this.lang, history: this.history, report, plan, fresh, lap }),
+        body: JSON.stringify({ track: this.track, lang: this.lang, car: this.car(), history: this.history, report, plan, fresh, lap }),
         signal: ctrl.signal,
       });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
@@ -65,8 +66,10 @@ export class Planner {
       this.onState({ type: "error", text: String(e && e.message ? e.message : e), lap });
       return null;
     } finally {
-      this.busy = false;
-      if (this.abort === ctrl) this.abort = null;
+      if (this.abort === ctrl) {
+        this.abort = null;
+        this.busy = false;
+      }
     }
   }
 

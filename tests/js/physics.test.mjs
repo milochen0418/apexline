@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Car, STEP, collide } from "../../assets/apexline/physics.js";
-import { Driver, LEVELS, cautiousPlan, gripPlan } from "../../assets/apexline/driver.js";
+import { Driver, LEVELS, cautiousPlan, cornerLimit, gripPlan } from "../../assets/apexline/driver.js";
 import { CARS, carSpec, carStats } from "../../assets/apexline/garage.js";
 import { drive, loadTrack } from "./sim.mjs";
 
@@ -261,6 +261,30 @@ test("every car laps cleanly at its own limits, and no car is best everywhere", 
   const stats = carStats(loadTrack("city").car);
   assert.equal(stats.hornet.grip, 1);
   assert.equal(stats.bison.top, 1);
+});
+
+test("the AI drives whichever car it is given, by that car's own limits", () => {
+  const track = loadTrack("city");
+  const spec = carSpec("bison", track.car);
+  const lap = (plan) => {
+    const car = new Car(track, "ai", spec);
+    car.reset(0, 0, 4);
+    const d = new Driver(car);
+    d.setPlan(plan);
+    let t = 0;
+    while (car.lapsDone < 1 && t < 300) {
+      car.step(d.control(null), STEP);
+      t += STEP;
+    }
+    return { t, walls: car.wallHits };
+  };
+  const c = track.corners[0];
+  assert.equal(cornerLimit(track, c, spec), c.limit_kmh * Math.sqrt(spec.lat / track.car.lat));
+  assert.equal(new Driver(new Car(track, "ai", spec)).plan.speeds[c.id], Math.round(cornerLimit(track, c, spec) * 0.7));
+  const own = lap(gripPlan(track, 1, spec));
+  const lighter = lap(gripPlan(track, 1.12, carSpec("hornet", track.car)));
+  assert.ok(own.walls <= 1, `its own plan: ${own.walls} knocks`);
+  assert.ok(lighter.walls > own.walls, `a plan for a grippier car: ${lighter.walls} knocks`);
 });
 
 test("each difficulty level is slower than the next and keeps the model's plan as it is", () => {

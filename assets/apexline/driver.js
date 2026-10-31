@@ -9,16 +9,21 @@
 
 import { clamp } from "./physics.js";
 
+// What the grip allows a car (`spec`) in a corner, km/h: the track's figure is for the road's car.
+export function cornerLimit(track, corner, spec = track.car) {
+  return corner.limit_kmh * Math.sqrt(spec.lat / track.car.lat);
+}
+
 // Every corner at `share` of what the grip allows a car (`spec`: the road's car by default).
 export function gripPlan(track, share = 1, spec = track.car) {
   const speeds = {};
-  for (const c of track.corners) speeds[c.id] = Math.round(c.limit_kmh * Math.sqrt(spec.lat / track.car.lat) * share);
+  for (const c of track.corners) speeds[c.id] = Math.round(cornerLimit(track, c, spec) * share);
   return { speeds, aggression: 1, note: "", version: 0 };
 }
 
 // Before the model has answered: every corner at 70% of what the grip allows.
-export function cautiousPlan(track) {
-  return gripPlan(track, 0.7);
+export function cautiousPlan(track, spec = track.car) {
+  return gripPlan(track, 0.7, spec);
 }
 
 // How the player can set the opponent: `pace` is its share of the plan's speeds (the straights'
@@ -36,7 +41,7 @@ export class Driver {
     this.track = car.track;
     this.level = LEVELS.full;
     this.target = new Float64Array(this.track.n);
-    this.setPlan(cautiousPlan(this.track));
+    this.setPlan(cautiousPlan(this.track, car.spec));
   }
 
   setLevel(level) {
@@ -62,7 +67,7 @@ export class Driver {
     }
     for (const c of tr.corners) {
       const kmh = Number(plan.speeds && plan.speeds[c.id]);
-      const v = clamp((Number.isFinite(kmh) && kmh > 0 ? kmh : c.limit_kmh * 0.7) / 3.6, 3, spec.vmax);
+      const v = clamp((Number.isFinite(kmh) && kmh > 0 ? kmh : cornerLimit(tr, c, spec) * 0.7) / 3.6, 3, spec.vmax);
       for (let i = c.from; ; i = (i + 1) % n) {
         caps[i] = v;
         if (i === c.to) break;
