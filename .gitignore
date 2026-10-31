@@ -25,3 +25,6 @@ venv/
 playwright_user_data/
 testcases/**/output/
 reflex.log
+
+# Film master and sources (the film is on YouTube)
+docs/videos/
