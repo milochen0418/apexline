@@ -2,6 +2,7 @@
 here behind re-ddns):
 
 - ``GET /_apexline/track/<id>``: a track as the game drives it (``apexline/data/tracks``);
+- ``GET /_apexline/music?ref=``: a song of the shared ``audio`` collection, for the race to play;
 - ``POST /_apexline/plan``: the AI's plan, streamed as lines of JSON (:mod:`apexline.strategist`).
   ``{track, lang, car, history, report, plan, fresh, lap}``; with no conversation yet and no lap,
   the plan the answering model remembers for this track and car comes back at once
@@ -10,15 +11,19 @@ here behind re-ddns):
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import json
 import logging
+import mimetypes
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 from reflex_ddns_auth import ai
+from reflex_ddns_auth.collections import Collection, CollectionError
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from apexline import store, strategist, trackgen
@@ -42,6 +47,25 @@ async def track(request: Request) -> Response:
     if track_id not in trackgen.BY_ID:
         return JSONResponse({"error": f"no track {track_id!r}"}, status_code=404)
     return Response(_track_text(track_id), media_type="application/json", headers={"Cache-Control": "no-cache"})
+
+
+def song_file(ref: str) -> Path | None:
+    """The file of a song in the shared collection on this host."""
+    try:
+        item = Collection("audio").get(ref, remote=False)
+    except CollectionError:
+        return None
+    if item is None or item.kind != "audio.file":
+        return None
+    path = item.primary
+    return path if path is not None and path.is_file() else None
+
+
+async def music(request: Request) -> Response:
+    path = await asyncio.to_thread(song_file, request.query_params.get("ref", ""))
+    if path is None:
+        return PlainTextResponse("no such song", status_code=404)
+    return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "audio/mpeg", headers={"Cache-Control": "private, max-age=3600"})
 
 
 async def _lines(events: AsyncIterator[dict[str, Any]]) -> AsyncIterator[str]:
@@ -85,6 +109,7 @@ async def plan(request: Request) -> Response:
 api = Starlette(
     routes=[
         Route("/_apexline/track/{track_id}", track, methods=["GET"]),
+        Route("/_apexline/music", music, methods=["GET"]),
         Route("/_apexline/plan", plan, methods=["POST"]),
     ]
 )

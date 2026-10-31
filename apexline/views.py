@@ -146,6 +146,7 @@ def race_page() -> rx.Component:
                 labels=Race.labels,
                 lang=Race.lang,
                 opponent=Race.opponent,
+                song=Race.song,
                 on_event=Race.handle,
             ),
         ),

@@ -3,8 +3,9 @@
 import React, { useEffect, useRef } from "react";
 import { Game } from "./game.js";
 
-export function ApexRace({ track, backend, labels, lang, opponent, onEvent }) {
+export function ApexRace({ track, backend, labels, lang, opponent, song, onEvent }) {
   const box = useRef(null);
+  const running = useRef(null);
   const handler = useRef(onEvent);
   handler.current = onEvent;
   const words = useRef(labels);
@@ -28,8 +29,19 @@ export function ApexRace({ track, backend, labels, lang, opponent, onEvent }) {
       console.error("Apexline:", e);
       return undefined;
     }
-    return () => game.dispose();
+    running.current = game;
+    return () => {
+      running.current = null;
+      game.dispose();
+    };
   }, [track, backend, lang]);
+
+  // A song chosen in another app's dialog.
+  useEffect(() => {
+    if (!song || !song.ref || !running.current) return;
+    running.current.setSong(song);
+    handler.current && handler.current({ type: "music.taken" });
+  }, [song]);
 
   return <div ref={box} className="ax-box" data-track={track} />;
 }

@@ -45,3 +45,22 @@ def test_a_plan_remembered_before_there_was_a_choice_is_the_road_cars(tmp_path, 
     assert store.memory("city", "m")["version"] == 3
     assert store.memory("city", "m", "gt")["version"] == 3
     assert store.records("m")["city"].remembered == 3
+
+
+def test_only_a_song_of_the_shared_library_is_served(tmp_path, monkeypatch):
+    from reflex_ddns_auth.collections import Collection
+
+    from apexline.api import song_file
+
+    monkeypatch.setenv("DDNS_COLLECTIONS_ROOT", str(tmp_path))
+    monkeypatch.delenv("DDNS_COLLECTIONS_NODE_URL", raising=False)
+    with Collection("audio", app_id="music-studio").publish("night-1", kind="audio.file", title="夜行", primary="a.mp3") as item:
+        with item.open("a.mp3") as fh:
+            fh.write(b"\xff\xfb" * 10)
+    with Collection("audio", app_id="music-studio").publish("note-1", kind="audio.note", title="not a song", primary="a.txt") as item:
+        with item.open("a.txt") as fh:
+            fh.write(b"x")
+    assert song_file("audio:music-studio/night-1").name == "a.mp3"
+    assert song_file("audio:music-studio/note-1") is None
+    assert song_file("audio:music-studio/none") is None
+    assert song_file("../../etc/passwd") is None

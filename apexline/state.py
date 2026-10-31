@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 import reflex as rx
 from reflex_ddns_auth import ai
+from reflex_ddns_auth.intent import Intent
 
 from apexline import store, strategist, trackgen
 from apexline.i18n import RACE, TEXT
@@ -138,6 +139,8 @@ class Lobby(rx.State):
 
 
 class Race(Lobby):
+    song: dict[str, Any] = {}
+
     @rx.var
     def labels(self) -> dict[str, str]:
         return RACE.get(self.lang, RACE["zh"])
@@ -163,3 +166,17 @@ class Race(Lobby):
                 store.save_race(result)
         elif kind == "leave":
             return rx.redirect("/")
+        elif kind == "music.taken":  # handed over once: another track keeps its own song
+            self.song = {}
+        elif kind == "music.pick":
+            return Intent.start(None, "audio.pick", on_result=Race.song_chosen, label="Music Box")
+        elif kind == "music.make":
+            return Intent.start(None, "audio.make", on_result=Race.song_chosen, keep_alive=True, label="Music Studio", words=str(event.get("words") or ""))
+
+    @rx.event
+    def song_chosen(self, data: dict[str, Any]):
+        """The answer of Music Box (``items``) or Music Studio (the item itself): the game plays it."""
+        items = data.get("items") if isinstance(data, dict) else None
+        item = items[0] if items else data
+        if isinstance(item, dict) and item.get("ref"):
+            self.song = {key: item.get(key) for key in ("ref", "title", "loop_start", "loop_end", "rights")}

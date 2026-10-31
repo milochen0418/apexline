@@ -20,6 +20,7 @@ import { CARS, carSpec, carStats } from "./garage.js";
 import { Guide } from "./guide.js";
 import { Hud, clock, fill, h } from "./hud.js";
 import { Input } from "./input.js";
+import { Music, saveSong, savedSong } from "./music.js";
 import { Car, STEP, Track, angleDiff, clamp, collide } from "./physics.js";
 import { Planner } from "./planner.js";
 import { buildWorld } from "./scenery.js";
@@ -68,6 +69,7 @@ export class Game {
     this.scene = new THREE.Scene();
     this.cams = [new THREE.PerspectiveCamera(66, 1, 0.5, 6000), new THREE.PerspectiveCamera(66, 1, 0.5, 6000)];
     this.sound = new Sound();
+    this.music = new Music(this.sound, (ref) => this.url(`/_apexline/music?ref=${encodeURIComponent(ref)}`));
     this.input = new Input((code) => this.key(code));
     this.note = h("div", { class: "ax-loading" }, this.t.loading || "Loading…");
     el.append(this.note);
@@ -114,6 +116,8 @@ export class Game {
     this.resize();
     this.phase = "briefing";
     this.showBriefing();
+    if (this.songWaiting) this.setSong(this.songWaiting);
+    else this.playSong(savedSong(pack.id));
     this.askedFor = this.aiCarName;
     this.planner.ask({ plan: null, lap: 0 });
     this.last = performance.now();
@@ -319,6 +323,51 @@ export class Game {
     );
   }
 
+  // ------------------------------------------------------------ music
+
+  playSong(song) {
+    this.music.load(song).then(() => {
+      if (this.disposed) return;
+      if (this.phase === "racing" || this.phase === "countdown") this.music.play();
+      this.redrawPanel?.();
+    });
+    this.redrawPanel?.();
+  }
+
+  // From the page: the song picked in Music Box or kept in Music Studio.
+  setSong(song) {
+    if (!this.pack) {
+      this.songWaiting = song; // the track isn't here yet
+      return;
+    }
+    saveSong(this.pack.id, song);
+    this.playSong(song);
+  }
+
+  // What plays in this race, and where to get it: the library's dialog or the studio's, which the
+  // page opens (they are other apps).
+  musicRow(redraw) {
+    const t = this.t;
+    this.redrawPanel = redraw;
+    const song = this.music.song;
+    const state = this.music.state;
+    const words = t[`music_words_${this.pack.theme}`] || t.music_words || "";
+    const name = !song ? t.music_none || "No music" : state === "failed" ? t.music_failed || "Couldn't read this song" : song.title;
+    const ask = (type, extra = {}) => () => this.opts.onEvent && this.opts.onEvent({ type, ...extra });
+    const volume = h("input", { type: "range", min: "0", max: "1", step: "0.05", value: String(this.music.volume), class: "ax-volume", title: t.music_volume || "Volume", "data-testid": "music-volume" });
+    volume.addEventListener("input", () => this.music.setVolume(Number(volume.value)));
+    return h(
+      "div",
+      { class: "ax-levels", "data-testid": "music" },
+      h("span", { class: "ax-level-label" }, t.music || "Music"),
+      h("span", { class: `ax-song ${state === "failed" ? "ax-bad" : ""}`, "data-testid": "music-now", title: name }, `♪ ${name}`),
+      this.button(t.music_pick || "Pick a song", ask("music.pick"), false, "music-pick"),
+      this.button(t.music_make || "Ask the AI for one", ask("music.make", { words }), false, "music-make"),
+      song ? this.button(t.music_off || "No music", () => this.setSong(null), false, "music-off") : null,
+      song ? volume : null,
+    );
+  }
+
   // Filled in when it is ready (cars.js draws them one at a time).
   picture(name, who) {
     return h("img", { alt: this.t[`car_${name}`] || name, src: carPicture(name, who) || null, "data-car": `${name}.${who}` });
@@ -400,6 +449,7 @@ export class Game {
         this.garage(() => this.showBriefing()),
         this.levelPicker(() => this.showBriefing()),
         this.aidPicker(() => this.showBriefing()),
+        this.musicRow(() => this.showBriefing()),
         h("div", { class: "ax-buttons" }, buttons),
         h("div", { class: "ax-keys" }, t.keys || "↑ throttle · ↓ brake · ← → steer · R back on the road · Esc pause · M sound · C camera"),
         h("div", { class: "ax-how" }, t.how_ai || ""),
@@ -421,6 +471,8 @@ export class Game {
   go() {
     this.sound.start();
     this.hud.panel(null);
+    this.redrawPanel = null;
+    this.music.play();
     this.phase = "countdown";
     this.countFrom = performance.now();
   }
@@ -612,6 +664,7 @@ export class Game {
   finish() {
     if (this.phase === "over") return;
     this.phase = "over";
+    this.music.fadeOut();
     this.planner.cancel();
     const t = this.t;
     const [pYou] = this.places();
@@ -670,6 +723,7 @@ export class Game {
         ...notes,
         this.garage(() => this.showResult(result)),
         this.levelPicker(() => this.showResult(result)),
+        this.musicRow(() => this.showResult(result)),
         h("div", { class: "ax-buttons" }, this.button(t.again || "Race again", () => this.again(), true, "again"), this.button(t.other_track || "Another track", () => this.leave(), false, "leave")),
       ),
     );
@@ -751,6 +805,7 @@ export class Game {
     this.observer.disconnect();
     this.planner?.cancel();
     this.input.dispose();
+    this.music.stop();
     this.sound.dispose();
     this.hud?.dispose();
     this.world?.dispose();

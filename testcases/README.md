@@ -47,3 +47,13 @@ Optional env vars:
 - `HEADLESS=0` to watch the browser
 - `PW_SLOWMO_MS=100` to slow actions down
 - `PW_TIMEOUT_MS=60000` to increase Playwright timeouts
+
+## Music (`music`)
+
+Runs with Music Studio and Music Box beside the game: start them on their own ports and tell the game
+where they are, all with one `DDNS_COLLECTIONS_ROOT`:
+
+```bash
+DDNS_INTENT_TRUST_LOCALHOST=1 DDNS_INTENT_PROVIDER_AUDIO_PICK=music-box DDNS_INTENT_PROVIDER_AUDIO_MAKE=music-studio \
+  DDNS_INTENT_URL_MUSIC_BOX=http://127.0.0.1:3176 DDNS_INTENT_URL_MUSIC_STUDIO=http://127.0.0.1:3175 ...
+```

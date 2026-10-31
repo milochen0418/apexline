@@ -8,6 +8,7 @@ its driving through the hub (:mod:`apexline.strategist`), asked through the game
 
 import reflex as rx
 from reflex_ddns_auth import ai
+from reflex_ddns_auth.intent import install_intent_host
 
 from apexline import strategist
 from apexline.api import api
@@ -27,5 +28,7 @@ app = rx.App(
 app.add_page(lobby_page, route="/", title="Apexline · 極速對決", on_load=Lobby.on_load)
 app.add_page(race_page, route="/race/[track]", title="Apexline · 極速對決", on_load=Race.load_race)
 
+# Music Box and Music Studio open in a dialog from the race.
+install_intent_host(app)
 # The AI Hub's page lists this app's AI by these words, with the model it answers with.
 ai.uses(app, **strategist.USES)
